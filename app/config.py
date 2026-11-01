@@ -30,7 +30,7 @@ ON_VERCEL = bool(os.getenv("VERCEL"))
 DB_PATH = Path(os.getenv("DB_PATH") or ("/tmp/emporio.db" if ON_VERCEL else BASE_DIR / "emporio.db"))
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash").strip()
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite").strip()
 HOST = os.getenv("HOST", "127.0.0.1")
 PORT = int(os.getenv("PORT", "8000"))
 
