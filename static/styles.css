@@ -105,8 +105,8 @@ body {
     "photoB photoA brand";
   gap: 1rem 1.1rem;
   align-items: stretch;
-  min-height: 520px;
-  margin-bottom: 1.8rem;
+  min-height: 360px;
+  margin-bottom: 1.4rem;
   animation: rise 0.7s ease both;
 }
 
@@ -151,7 +151,7 @@ body {
 
 .photo-a {
   grid-area: photoA;
-  min-height: 520px;
+  min-height: 360px;
 }
 
 .photo-a img {
@@ -160,7 +160,7 @@ body {
 
 .photo-b {
   grid-area: photoB;
-  min-height: 210px;
+  min-height: 160px;
 }
 
 .photo-b img {
@@ -229,7 +229,7 @@ body {
   border-top: 1px solid var(--ink);
   border-bottom: 1px solid var(--ink);
   background: rgba(255, 252, 245, 0.55);
-  min-height: 560px;
+  height: clamp(480px, 78vh, 680px);
   display: flex;
   flex-direction: column;
 }
@@ -325,6 +325,17 @@ body {
   padding: 0.2rem;
 }
 
+.bubble.error {
+  align-self: center;
+  max-width: 92%;
+  text-align: center;
+  color: #8a2c1d;
+  background: #fbeee9;
+  border: 1px solid #e7c3b8;
+  font-size: 0.86rem;
+  padding: 0.5rem 0.75rem;
+}
+
 .bubble.typing {
   align-self: flex-start;
   display: inline-flex;
@@ -400,9 +411,14 @@ body {
   cursor: pointer;
 }
 
-.prompts button:hover {
+.prompts button:hover:not(:disabled) {
   background: var(--ink);
   color: var(--paper);
+}
+
+.prompts button:disabled {
+  opacity: 0.45;
+  cursor: wait;
 }
 
 .composer {
@@ -499,15 +515,19 @@ body {
   }
 
   .photo-a {
-    min-height: 320px;
+    min-height: 180px;
   }
 
   .photo-b {
-    min-height: 200px;
+    display: none;
   }
 
   .desk {
     grid-template-columns: 1fr;
+  }
+
+  .intro > p:not(.label) {
+    display: none;
   }
 }
 
