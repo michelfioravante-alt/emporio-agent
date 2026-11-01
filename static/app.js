@@ -12,6 +12,12 @@ const scenarioButtons = document.querySelectorAll("#scenarios button");
 
 const MAX_HISTORY_SENT = 12;
 const REQUEST_TIMEOUT_MS = 45000;
+// Instant, all-at-once replies feel robotic: show "digitando…" briefly, then reveal the
+// reply word by word. Only the UI paces itself; the API answers as fast as it can.
+const MIN_TYPING_MS = 700;
+const WORD_DELAY_MS = 35;
+const MAX_REVEAL_MS = 4000;
+const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 // sessionStorage: the conversation survives a reload but is gone when the tab closes.
 const STORAGE_KEY = "emporio-chat-v1";
 const WELCOME =
@@ -109,6 +115,33 @@ function loadConversation() {
   }
 }
 
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function revealReply(text) {
+  if (reducedMotion) {
+    addBubble("assistant", text);
+    return;
+  }
+  const bubble = addBubble("assistant", "");
+  chatEl.setAttribute("aria-busy", "true");
+  // Split keeping whitespace so line breaks and list layout are preserved.
+  const tokens = text.split(/(\s+)/);
+  const words = tokens.filter((token) => token.trim()).length || 1;
+  const delay = Math.min(WORD_DELAY_MS, MAX_REVEAL_MS / words);
+  let shown = "";
+  for (const token of tokens) {
+    shown += token;
+    if (!token.trim()) continue;
+    // Close an unfinished **bold** so the partial text never shows raw asterisks.
+    const unbalanced = (shown.match(/\*\*/g) || []).length % 2 === 1;
+    bubble.innerHTML = renderRichText(unbalanced ? `${shown}**` : shown);
+    chatEl.scrollTop = chatEl.scrollHeight;
+    await sleep(delay);
+  }
+  bubble.innerHTML = renderRichText(text);
+  chatEl.removeAttribute("aria-busy");
+}
+
 function errorMessage(data) {
   if (data && typeof data.detail === "string" && data.detail) return data.detail;
   return "Não foi possível concluir o atendimento agora. Tente novamente.";
@@ -140,6 +173,7 @@ async function sendMessage(text) {
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const startedAt = performance.now();
 
   try {
     const res = await fetch("/api/chat", {
@@ -153,6 +187,9 @@ async function sendMessage(text) {
       signal: controller.signal,
     });
     const data = await res.json().catch(() => ({}));
+    if (res.ok) {
+      await sleep(Math.max(0, MIN_TYPING_MS - (performance.now() - startedAt)));
+    }
     hideTyping();
 
     if (!res.ok) {
@@ -162,9 +199,9 @@ async function sendMessage(text) {
       return;
     }
 
-    addBubble("assistant", data.reply);
     history.push({ role: "user", content: message }, { role: "assistant", content: data.reply });
     saveConversation();
+    await revealReply(data.reply);
     renderActivity(data.activity || []);
 
     if (reviewMode && data.debug) {
