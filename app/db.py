@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import csv
 import sqlite3
+import unicodedata
 from pathlib import Path
 
 from .config import DATA_DIR, DB_PATH
@@ -30,10 +31,18 @@ def _find_policy_pdf() -> Path:
     return matches[0]
 
 
+def norm_text(value: str | None) -> str:
+    """Lowercase and strip accents, so 'Violões' and 'violoes' compare equal."""
+    text = unicodedata.normalize("NFKD", value or "")
+    return "".join(ch for ch in text if not unicodedata.combining(ch)).lower()
+
+
 def connect() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    # SQLite's LOWER() only handles ASCII; this keeps accent-insensitive search in SQL.
+    conn.create_function("norm_text", 1, norm_text, deterministic=True)
     return conn
 
 

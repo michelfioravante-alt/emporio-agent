@@ -7,13 +7,13 @@ policies need semantic topic matching.
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 import sqlite3
-import unicodedata
 from typing import Any
 
-from .db import connect
+from .db import connect, norm_text
 from .policies import search_policies
 
 logger = logging.getLogger("emporio.tools")
@@ -22,27 +22,31 @@ TOOL_DECLARATIONS = [
     {
         "name": "search_products",
         "description": (
-            "Search the product catalog by free text, category and/or price. "
-            "Use for availability, price and promotion questions."
+            "Search the product catalog by keywords, category and/or price. "
+            "Use for availability, price and promotion questions. Results are sorted "
+            "by final price and include total_count (all matches) and returned (this page)."
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "query": {
                     "type": "string",
-                    "description": "Free-text filter on product name/description, e.g. Takamine, nylon, ukulele.",
+                    "description": (
+                        "Product keywords only (brand, model, material, feature), e.g. 'Takamine', "
+                        "'nylon', 'eletroacústico'. Accents optional. Never put prices here."
+                    ),
                 },
                 "category": {
                     "type": "string",
-                    "description": "Category name fragment, e.g. Violões, Guitarras, Ukuleles.",
+                    "description": "Category name, e.g. violões, guitarras, ukuleles, baixos.",
                 },
                 "max_price": {
                     "type": "number",
-                    "description": "Maximum list price in BRL.",
+                    "description": "Maximum final price in BRL (promotional price when there is an active promotion).",
                 },
                 "min_price": {
                     "type": "number",
-                    "description": "Minimum list price in BRL.",
+                    "description": "Minimum final price in BRL.",
                 },
                 "only_available": {
                     "type": "boolean",
@@ -57,7 +61,10 @@ TOOL_DECLARATIONS = [
     },
     {
         "name": "get_product_details",
-        "description": "Get one product by id or exact/partial name, including active promotion if any.",
+        "description": (
+            "Get one product by id or name (partial ok), with active promotion, PIX price, "
+            "credit-card installments and, when unavailable, similar available alternatives."
+        ),
         "parameters": {
             "type": "object",
             "properties": {
@@ -113,10 +120,25 @@ TOOL_DECLARATIONS = [
 ]
 
 
-def _norm(value: str | None) -> str:
-    text = unicodedata.normalize("NFKD", value or "")
-    text = "".join(ch for ch in text if not unicodedata.combining(ch))
-    return re.sub(r"[^a-z0-9]+", "", text.lower())
+_STOPWORDS = {
+    "de", "da", "do", "das", "dos", "com", "para", "pra", "e", "o", "a", "os", "as",
+    "um", "uma", "em", "ate", "reais", "rs", "preco", "valor",
+}
+
+
+def _stem(token: str) -> str:
+    """Tiny Portuguese plural folding: violões -> violao, guitarras -> guitarra."""
+    for suffix, replacement in (("oes", "ao"), ("aes", "ao"), ("ais", "al"), ("eis", "el")):
+        if token.endswith(suffix) and len(token) > 4:
+            return token[: -len(suffix)] + replacement
+    if token.endswith("s") and len(token) > 3:
+        return token[:-1]
+    return token
+
+
+def _search_tokens(value: str | None) -> list[str]:
+    tokens = re.findall(r"[a-z0-9]+", norm_text(value))
+    return [_stem(tok) for tok in tokens if len(tok) >= 2 and tok not in _STOPWORDS]
 
 
 def _digits(value: str | None) -> str:
@@ -129,13 +151,33 @@ def _money(value: float | None) -> float | None:
     return round(float(value), 2)
 
 
+PIX_DISCOUNT_PERCENT = 5
+
+# Policy 3.1. Assumption: "até 3x ... exceto abaixo de R$ 50,00" = minimum installment of R$ 50.
+_INSTALLMENT_MINIMUMS = [(3, 50.0), (6, 80.0), (12, 100.0)]
+
+
+def _installments(total: float) -> dict[str, Any]:
+    best = 1
+    for n in range(2, 13):
+        minimum = next(value for max_n, value in _INSTALLMENT_MINIMUMS if n <= max_n)
+        if total / n >= minimum:
+            best = n
+    return {"max_installments_no_interest": best, "installment_value_brl": _money(total / best)}
+
+
+def _parse_specs(raw: str | None) -> Any:
+    try:
+        return json.loads(raw) if raw else None
+    except json.JSONDecodeError:
+        return raw
+
+
 def _product_row(row: sqlite3.Row) -> dict[str, Any]:
     list_price = float(row["price_brl"])
     discount = row["discount_percent"]
-    promo_active = bool(row["promo_active"]) if row["promo_active"] is not None else False
-    promo_price = None
-    if promo_active and discount is not None:
-        promo_price = _money(list_price * (1 - float(discount) / 100))
+    promo_price = _money(list_price * (1 - float(discount) / 100)) if discount is not None else None
+    final_price = promo_price if promo_price is not None else list_price
 
     available = row["status"] == "active" and int(row["stock_quantity"]) > 0
     return {
@@ -145,45 +187,66 @@ def _product_row(row: sqlite3.Row) -> dict[str, Any]:
         "list_price_brl": _money(list_price),
         "active_promotion": (
             {
-                "description": row["promo_description"],
+                "campaign": row["promo_description"],
                 "discount_percent": float(discount),
                 "promo_price_brl": promo_price,
+                "display_rule": "Always show original price, discount % and promotional price together.",
             }
-            if promo_active
+            if promo_price is not None
             else None
         ),
+        # PIX 5% never stacks with a promotion (policy 6.2).
+        "pix_price_brl": None if promo_price is not None else _money(list_price * (1 - PIX_DISCOUNT_PERCENT / 100)),
+        "credit_card": _installments(final_price),
         "stock_quantity": int(row["stock_quantity"]),
         "status": row["status"],
         "available_for_sale": available,
         "description": row["description"],
-        "specs": row["specs"],
-        "notes": (
-            "PIX 5% discount applies only on non-promotional list prices."
-            if not promo_active
-            else "Promotional price already includes campaign discount. PIX 5% does not stack."
-        ),
+        "specs": _parse_specs(row["specs"]),
     }
 
 
+# Wrapped in a subquery so filters can use the computed effective price and search text.
 _PRODUCT_SELECT = """
-SELECT
-    p.product_id,
-    p.name,
-    p.price_brl,
-    p.description,
-    p.stock_quantity,
-    p.status,
-    p.specs,
-    c.name AS category_name,
-    pr.discount_percent,
-    pr.description AS promo_description,
-    pr.is_active AS promo_active
-FROM products p
-JOIN categories c ON c.category_id = p.category_id
-LEFT JOIN promotions pr
-    ON pr.product_id = p.product_id
-   AND pr.is_active = 1
+SELECT * FROM (
+    SELECT
+        p.product_id,
+        p.name,
+        p.price_brl,
+        p.description,
+        p.stock_quantity,
+        p.status,
+        p.specs,
+        p.category_id,
+        c.name AS category_name,
+        pr.discount_percent,
+        pr.description AS promo_description,
+        ROUND(p.price_brl * (1 - COALESCE(pr.discount_percent, 0) / 100.0), 2) AS effective_price,
+        norm_text(p.name || ' ' || COALESCE(p.description, '') || ' ' || COALESCE(p.specs, '') || ' ' || c.name) AS search_text
+    FROM products p
+    JOIN categories c ON c.category_id = p.category_id
+    LEFT JOIN (
+        SELECT product_id, MAX(discount_percent) AS discount_percent, description
+        FROM promotions
+        WHERE is_active = 1
+        GROUP BY product_id
+    ) pr ON pr.product_id = p.product_id
+) AS catalog
 """
+
+_AVAILABLE_CLAUSE = "status = 'active' AND stock_quantity > 0"
+
+
+def _category_ids(conn: sqlite3.Connection, category: str) -> list[int]:
+    wanted = _search_tokens(category)
+    if not wanted:
+        return []
+    ids = []
+    for row in conn.execute("SELECT category_id, name FROM categories"):
+        tokens = set(_search_tokens(row["name"]))
+        if all(any(tok.startswith(w) or w.startswith(tok) for tok in tokens) for w in wanted):
+            ids.append(row["category_id"])
+    return ids
 
 
 def search_products(
@@ -198,37 +261,67 @@ def search_products(
     params: list[Any] = []
 
     if only_available:
-        clauses.append("p.status = 'active' AND p.stock_quantity > 0")
+        clauses.append(_AVAILABLE_CLAUSE)
 
-    if query:
-        clauses.append("(LOWER(p.name) LIKE ? OR LOWER(p.description) LIKE ? OR LOWER(p.specs) LIKE ?)")
-        like = f"%{query.lower()}%"
-        params.extend([like, like, like])
-
-    if category:
-        clauses.append("LOWER(c.name) LIKE ?")
-        params.append(f"%{category.lower()}%")
+    for token in _search_tokens(query):
+        clauses.append("search_text LIKE ?")
+        params.append(f"%{token}%")
 
     if max_price is not None:
-        clauses.append("p.price_brl <= ?")
-        params.append(max_price)
+        clauses.append("effective_price <= ?")
+        params.append(float(max_price))
 
     if min_price is not None:
-        clauses.append("p.price_brl >= ?")
-        params.append(min_price)
-
-    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
-    sql = f"{_PRODUCT_SELECT} {where} ORDER BY p.price_brl ASC LIMIT ?"
-    params.append(max(1, min(int(limit or 8), 20)))
+        clauses.append("effective_price >= ?")
+        params.append(float(min_price))
 
     with connect() as conn:
-        rows = conn.execute(sql, params).fetchall()
+        if category:
+            ids = _category_ids(conn, category)
+            if not ids:
+                return {
+                    "total_count": 0,
+                    "products": [],
+                    "hint": "Unknown category. Call list_categories to see what the store sells.",
+                }
+            clauses.append(f"category_id IN ({','.join('?' * len(ids))})")
+            params.extend(ids)
+
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        total = conn.execute(f"SELECT COUNT(*) FROM ({_PRODUCT_SELECT} {where})", params).fetchone()[0]
+        page_size = max(1, min(int(limit or 8), 20))
+        rows = conn.execute(
+            f"{_PRODUCT_SELECT} {where} ORDER BY effective_price ASC LIMIT ?",
+            [*params, page_size],
+        ).fetchall()
 
     return {
-        "count": len(rows),
+        "total_count": total,
+        "returned": len(rows),
         "products": [_product_row(row) for row in rows],
-        "hint": "If count is 0, suggest broadening filters or another category.",
+        "hint": (
+            "No match: suggest broadening filters or another category."
+            if total == 0
+            else "If total_count > returned, say there are more options and offer to filter further."
+        ),
     }
+
+
+def _alternatives(conn: sqlite3.Connection, row: sqlite3.Row, limit: int = 3) -> list[dict[str, Any]]:
+    rows = conn.execute(
+        f"""{_PRODUCT_SELECT}
+        WHERE {_AVAILABLE_CLAUSE} AND category_id = ? AND product_id != ?
+        ORDER BY ABS(effective_price - ?) ASC LIMIT ?""",
+        (row["category_id"], row["product_id"], row["effective_price"], limit),
+    ).fetchall()
+    return [
+        {
+            "product_id": alt["product_id"],
+            "name": alt["name"],
+            "price_brl": _money(alt["effective_price"]),
+        }
+        for alt in rows
+    ]
 
 
 def get_product_details(product_id: int | None = None, name: str | None = None) -> dict[str, Any]:
@@ -237,19 +330,24 @@ def get_product_details(product_id: int | None = None, name: str | None = None) 
 
     with connect() as conn:
         if product_id is not None:
-            row = conn.execute(
-                f"{_PRODUCT_SELECT} WHERE p.product_id = ?",
-                (product_id,),
-            ).fetchone()
+            row = conn.execute(f"{_PRODUCT_SELECT} WHERE product_id = ?", (int(product_id),)).fetchone()
         else:
+            tokens = _search_tokens(name)
+            if not tokens:
+                return {"found": False, "message": "Product not found in catalog."}
+            where = " AND ".join("norm_text(name) LIKE ?" for _ in tokens)
             row = conn.execute(
-                f"{_PRODUCT_SELECT} WHERE LOWER(p.name) LIKE ? ORDER BY LENGTH(p.name) ASC LIMIT 1",
-                (f"%{(name or '').lower()}%",),
+                f"{_PRODUCT_SELECT} WHERE {where} ORDER BY LENGTH(name) ASC LIMIT 1",
+                [f"%{tok}%" for tok in tokens],
             ).fetchone()
 
-    if not row:
-        return {"found": False, "message": "Product not found in catalog."}
-    return {"found": True, "product": _product_row(row)}
+        if not row:
+            return {"found": False, "message": "Product not found in catalog. Try search_products with fewer words."}
+
+        result: dict[str, Any] = {"found": True, "product": _product_row(row)}
+        if not result["product"]["available_for_sale"]:
+            result["available_alternatives"] = _alternatives(conn, row)
+    return result
 
 
 def list_categories() -> dict[str, Any]:
@@ -291,9 +389,7 @@ _ORDER_NOT_VERIFIED = {
 
 
 def _name_tokens(value: str | None) -> list[str]:
-    text = unicodedata.normalize("NFKD", value or "")
-    text = "".join(ch for ch in text if not unicodedata.combining(ch)).lower()
-    return [tok for tok in re.findall(r"[a-z]+", text) if tok not in _NAME_PARTICLES]
+    return [tok for tok in re.findall(r"[a-z]+", norm_text(value)) if tok not in _NAME_PARTICLES]
 
 
 def _name_matches(given: str | None, stored: str) -> bool:

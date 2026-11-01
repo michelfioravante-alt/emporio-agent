@@ -162,7 +162,7 @@ def _activity_detail(name: str, args: dict[str, Any], result: Any) -> str:
             bits.append(f"até R$ {args['max_price']}")
         count = None
         if isinstance(result, dict):
-            count = result.get("count")
+            count = result.get("total_count")
         suffix = f" · {count} item(ns)" if count is not None else ""
         return (", ".join(bits) or "filtros do catálogo") + suffix
 
@@ -223,7 +223,7 @@ def _summarize_result(name: str | None, result: Any) -> dict[str, Any]:
     if not isinstance(result, dict):
         return {"ok": True}
     if name == "search_products":
-        return {"count": result.get("count"), "ok": True}
+        return {"total_count": result.get("total_count"), "returned": result.get("returned")}
     if name == "get_product_details":
         product = result.get("product") or {}
         return {
