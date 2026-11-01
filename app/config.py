@@ -21,6 +21,9 @@ IS_PRODUCTION = APP_ENV == "production"
 MAX_TOOL_ROUNDS = 6
 MAX_MESSAGE_LENGTH = 1500
 MAX_HISTORY_MESSAGES = 12
+# Assistant replies can be longer than user messages; history is truncated, never rejected.
+MAX_HISTORY_CONTENT_LENGTH = 4000
+MAX_BODY_BYTES = 100_000
 RATE_LIMIT_BURST = int(os.getenv("RATE_LIMIT_BURST", "20"))
 RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("RATE_LIMIT_WINDOW_SECONDS", "60"))
 

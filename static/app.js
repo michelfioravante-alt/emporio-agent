@@ -10,6 +10,7 @@ const reviewPanel = document.getElementById("reviewPanel");
 const reviewDebug = document.getElementById("reviewDebug");
 
 const history = [];
+const MAX_HISTORY_SENT = 12;
 const reviewMode = new URLSearchParams(window.location.search).get("review") === "1";
 
 function setPresence(state, text) {
@@ -65,6 +66,11 @@ function escapeHtml(value) {
     .replaceAll("'", "&#39;");
 }
 
+function errorMessage(data) {
+  if (data && typeof data.detail === "string" && data.detail) return data.detail;
+  return "Não foi possível concluir o atendimento agora. Tente novamente.";
+}
+
 async function refreshHealth() {
   try {
     const res = await fetch("/api/health");
@@ -96,16 +102,15 @@ async function sendMessage(text) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         message,
-        history: history.slice(0, -1),
+        history: history.slice(0, -1).slice(-MAX_HISTORY_SENT),
         include_debug: reviewMode,
       }),
     });
-    const data = await res.json();
+    const data = await res.json().catch(() => ({}));
     hideTyping();
 
     if (!res.ok) {
-      const detail = data.detail || "Não foi possível concluir o atendimento agora.";
-      addBubble("system", detail);
+      addBubble("system", errorMessage(data));
       history.pop();
       renderActivity([]);
       setPresence("offline", "Tente novamente");

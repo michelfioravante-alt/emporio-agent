@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -16,7 +17,8 @@ from .config import (
     BASE_DIR,
     CORS_ORIGINS,
     IS_PRODUCTION,
-    MAX_HISTORY_MESSAGES,
+    MAX_BODY_BYTES,
+    MAX_HISTORY_CONTENT_LENGTH,
     MAX_MESSAGE_LENGTH,
 )
 from .db import init_db
@@ -62,20 +64,18 @@ app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
 class ChatMessage(BaseModel):
     role: Literal["user", "assistant"]
-    content: str = Field(min_length=1, max_length=MAX_MESSAGE_LENGTH)
+    content: str
 
     @field_validator("content")
     @classmethod
     def clean_content(cls, value: str) -> str:
-        cleaned = sanitize_text(value)
-        if not cleaned:
-            raise ValueError("empty content")
-        return cleaned
+        return sanitize_text(value, MAX_HISTORY_CONTENT_LENGTH)
 
 
 class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=MAX_MESSAGE_LENGTH)
-    history: list[ChatMessage] = Field(default_factory=list, max_length=MAX_HISTORY_MESSAGES)
+    # Not capped here: older turns are dropped by normalize_history instead of failing the request.
+    history: list[ChatMessage] = Field(default_factory=list)
     include_debug: bool = False
 
     @field_validator("message")
@@ -100,7 +100,14 @@ class ChatResponse(BaseModel):
 
 @app.middleware("http")
 async def security_headers(request: Request, call_next):
-    response: Response = await call_next(request)
+    response: Response
+    length = request.headers.get("content-length")
+    if request.method == "POST" and length is None:
+        response = JSONResponse(status_code=411, content={"detail": "Requisição inválida."})
+    elif request.method == "POST" and (not length.isdigit() or int(length) > MAX_BODY_BYTES):
+        response = JSONResponse(status_code=413, content={"detail": "Mensagem grande demais."})
+    else:
+        response = await call_next(request)
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "no-referrer"
@@ -167,6 +174,17 @@ def api_chat(payload: ChatRequest, request: Request) -> ChatResponse:
 @app.exception_handler(HTTPException)
 async def http_exception_handler(_: Request, exc: HTTPException):
     return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(_: Request, exc: RequestValidationError):
+    fields = {str(err.get("loc", ["", ""])[1]) for err in exc.errors() if len(err.get("loc", ())) > 1}
+    detail = (
+        f"A mensagem precisa ter entre 1 e {MAX_MESSAGE_LENGTH} caracteres."
+        if "message" in fields
+        else "Não entendi a requisição. Recarregue a página e tente de novo."
+    )
+    return JSONResponse(status_code=422, content={"detail": detail})
 
 
 def run() -> None:
