@@ -6,6 +6,10 @@ The agent answers catalog questions (price, stock, promotions, PIX and installme
 
 The agent, the chat interface and the sample dialogues are in Portuguese, the language of the store and its customers. This README is in English, as required by the submission instructions.
 
+**Live demo:** https://emporio-agent.vercel.app
+
+The demo runs on the free Gemini tier. A burst of messages can hit that daily cap. When it does, the chat shows the store's WhatsApp number instead of an error page. See [Limitations](#limitations-and-next-steps).
+
 ## Contents
 
 - [How to run](#how-to-run)
@@ -144,7 +148,7 @@ pytest
 
 ## Deploying on Vercel
 
-The project runs on Vercel without code changes (`app/main.py` is detected as a FastAPI app):
+Production is already deployed at https://emporio-agent.vercel.app (São Paulo region). The project runs on Vercel without code changes (`app/main.py` is detected as a FastAPI app):
 
 1. Import the repository on Vercel.
 2. Set `GEMINI_API_KEY` under Environment Variables (optional: `DAILY_CHAT_LIMIT`, `GEMINI_MODEL`).
