@@ -12,6 +12,7 @@ from fastapi import HTTPException, Request
 
 from .config import (
     DAILY_CHAT_LIMIT,
+    MAX_HISTORY_CONTENT_LENGTH,
     MAX_HISTORY_MESSAGES,
     MAX_MESSAGE_LENGTH,
     RATE_LIMIT_BURST,
@@ -132,7 +133,7 @@ def normalize_history(raw_history: list[Any]) -> list[dict[str, str]]:
         content = getattr(item, "content", None) or (item.get("content") if isinstance(item, dict) else None)
         if role not in ALLOWED_ROLES:
             continue
-        text = sanitize_text(str(content or ""), MAX_MESSAGE_LENGTH)
+        text = sanitize_text(str(content or ""), MAX_HISTORY_CONTENT_LENGTH)
         if not text:
             continue
         cleaned.append({"role": role, "content": text})

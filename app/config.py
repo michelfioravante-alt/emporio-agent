@@ -19,6 +19,7 @@ APP_ENV = os.getenv("APP_ENV", "development").strip().lower()
 IS_PRODUCTION = APP_ENV == "production"
 
 MAX_TOOL_ROUNDS = 6
+MAX_OUTPUT_TOKENS = 1024
 MAX_MESSAGE_LENGTH = 1500
 MAX_HISTORY_MESSAGES = 12
 # Assistant replies can be longer than user messages; history is truncated, never rejected.

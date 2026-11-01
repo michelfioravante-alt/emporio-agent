@@ -11,8 +11,10 @@ import json
 import logging
 import re
 import sqlite3
+from datetime import date, timedelta
 from typing import Any
 
+from .clock import now_local, store_context
 from .db import connect, norm_text
 from .policies import search_policies
 
@@ -403,6 +405,70 @@ def _phone_matches(given: str | None, stored: str | None) -> bool:
     return len(given_digits) >= 10 and given_digits[-11:] == stored_digits[-11:]
 
 
+ORDER_STATUS_PT = {
+    "pending": "pendente (aguardando confirmação do pagamento)",
+    "confirmed": "confirmado (em separação, ainda não enviado)",
+    "shipped": "enviado (em transporte)",
+    "delivered": "entregue",
+    "cancelled": "cancelado",
+}
+
+_PAYMENT_PT = {"pix": "PIX", "boleto": "boleto bancário", "debit": "cartão de débito"}
+
+
+def _payment_label(raw: str | None) -> str | None:
+    if not raw:
+        return None
+    match = re.fullmatch(r"credit_(\d+)x", raw)
+    if match:
+        return f"cartão de crédito em {match.group(1)}x"
+    return _PAYMENT_PT.get(raw, raw)
+
+
+def _window(start: date, days: int, today: date) -> dict[str, Any]:
+    deadline = start + timedelta(days=days)
+    return {
+        "deadline": deadline.isoformat(),
+        "within_deadline": today <= deadline,
+        "days_left": max((deadline - today).days, 0),
+    }
+
+
+def _after_sales(status: str, order_date: str | None, estimated_delivery: str | None) -> dict[str, Any]:
+    """Deterministic policy deadlines (sections 4 and 8) so the LLM never does date math."""
+    today = now_local().date()
+    if status == "cancelled":
+        return {"note": "Cancelled order: no return or exchange applies."}
+    if status in {"pending", "confirmed"}:
+        return {
+            "note": (
+                "Not shipped yet. Return windows start on delivery. Cancellation requests "
+                "are handled by the human team via WhatsApp."
+            )
+        }
+    if status == "shipped":
+        return {"note": "In transit. The 7-day withdrawal right starts when the customer receives it."}
+
+    # Assumption: the dataset has no real delivery date, so estimated_delivery is used as receipt date.
+    received = date.fromisoformat(estimated_delivery) if estimated_delivery else None
+    purchased = date.fromisoformat(order_date) if order_date else None
+    result: dict[str, Any] = {
+        "today": today.isoformat(),
+        "receipt_date_assumed": received.isoformat() if received else None,
+    }
+    if received:
+        result["withdrawal_7_days"] = _window(received, 7, today)
+        result["preference_exchange_7_days"] = _window(received, 7, today)
+        result["legal_warranty_90_days"] = _window(received, 90, today)
+    if purchased:
+        result["defect_exchange_30_days"] = _window(purchased, 30, today)
+    result["after_deadlines"] = (
+        "If defect exchange (30 days) expired, the customer uses the manufacturer warranty; "
+        "the store can intermediate on request."
+    )
+    return result
+
+
 def get_order_status(
     order_id: int,
     customer_name: str | None = None,
@@ -460,9 +526,11 @@ def get_order_status(
         "order": {
             "order_id": row["order_id"],
             "status": row["status"],
+            "status_pt": ORDER_STATUS_PT.get(row["status"], row["status"]),
             "order_date": row["order_date"],
             "total_brl": _money(row["total_brl"]),
-            "payment_method": row["payment_method"],
+            "payment_method": _payment_label(row["payment_method"]),
+            "after_sales": _after_sales(row["status"], row["order_date"], row["estimated_delivery"]),
             "tracking_code": row["tracking_code"] or None,
             "estimated_delivery": row["estimated_delivery"] or None,
             "notes": row["notes"] or None,
@@ -504,6 +572,8 @@ def get_store_profile() -> dict[str, Any]:
         "tagline": "Sua música começa aqui.",
         "city": "Campo Grande - MS",
         "address": "Rua 14 de Maio, 3200 — Centro, Campo Grande - MS, 79202-333",
+        # The manual lists (67) 3341-4444 as phone/WhatsApp on the cover and in 1.2,
+        # but (67) 3321-4500 as the WhatsApp channel in section 7. Both are kept as written.
         "phone": "(67) 3341-4444",
         "whatsapp_support": "(67) 3321-4500",
         "email": "contato@emporiodamusica.com.br",
@@ -511,7 +581,9 @@ def get_store_profile() -> dict[str, Any]:
             "monday_to_friday": "09:00 às 18:00",
             "saturday": "09:00 às 13:00",
             "sunday_and_holidays": "Fechado",
+            "special_dates": "Black Friday, aniversário da loja e Natal podem ter horário estendido.",
         },
+        "now": store_context(),
         "scope": "Musical instruments only. No accessories.",
         "tone": "Informal but professional, like a music-savvy friend.",
     }

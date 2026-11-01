@@ -14,8 +14,15 @@ from google import genai
 from google.genai import errors as genai_errors
 from google.genai import types
 
-from .config import GEMINI_API_KEY, GEMINI_MODEL, MAX_TOOL_ROUNDS
-from .prompts import SYSTEM_PROMPT
+from .clock import store_context
+from .config import (
+    GEMINI_API_KEY,
+    GEMINI_MODEL,
+    MAX_HISTORY_CONTENT_LENGTH,
+    MAX_OUTPUT_TOKENS,
+    MAX_TOOL_ROUNDS,
+)
+from .prompts import build_system_prompt
 from .security import looks_like_injection, sanitize_text
 from .tools import TOOL_DECLARATIONS, run_tool
 
@@ -43,7 +50,7 @@ def _client() -> genai.Client:
     return genai.Client(api_key=_require_api_key())
 
 
-def _tool_config() -> types.GenerateContentConfig:
+def _tool_config(system_prompt: str) -> types.GenerateContentConfig:
     declarations = [
         types.FunctionDeclaration(
             name=item["name"],
@@ -53,8 +60,9 @@ def _tool_config() -> types.GenerateContentConfig:
         for item in TOOL_DECLARATIONS
     ]
     return types.GenerateContentConfig(
-        system_instruction=SYSTEM_PROMPT,
+        system_instruction=system_prompt,
         temperature=0.3,
+        max_output_tokens=MAX_OUTPUT_TOKENS,
         tools=[types.Tool(function_declarations=declarations)],
     )
 
@@ -63,7 +71,7 @@ def _history_to_contents(history: list[dict[str, str]]) -> list[types.Content]:
     contents: list[types.Content] = []
     for message in history:
         role = message.get("role", "user")
-        text = sanitize_text(message.get("content") or "")
+        text = sanitize_text(message.get("content") or "", MAX_HISTORY_CONTENT_LENGTH)
         if not text:
             continue
         gemini_role = "model" if role == "assistant" else "user"
@@ -115,7 +123,8 @@ def chat(message: str, history: list[dict[str, str]] | None = None) -> dict[str,
     )
 
     client = _client()
-    config = _tool_config()
+    # Rebuilt every turn so "now", opening status and policy deadlines stay correct.
+    config = _tool_config(build_system_prompt(store_context()))
     tool_trace: list[dict[str, Any]] = []
 
     for _ in range(MAX_TOOL_ROUNDS):
