@@ -87,6 +87,7 @@ static/         # interface do chat (HTML/CSS/JS sem framework)
 tests/          # pytest, sem chamadas reais ao LLM
 data/           # CSVs e PDF fornecidos no desafio
 examples/       # conversas reais com o agente
+scripts/        # record_examples.py: regrava os exemplos com o modelo configurado
 ```
 
 ## Decisões técnicas
@@ -137,7 +138,7 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-56 testes, sem chamadas reais ao LLM: autorização de pedidos, prazos de pós-venda, busca, regras de preço, horário de funcionamento, validações da API, redação de dados pessoais, rate limit e o loop do agente com um cliente Gemini simulado.
+57 testes, sem chamadas reais ao LLM: autorização de pedidos, prazos de pós-venda, busca, regras de preço, horário de funcionamento, validações da API, redação de dados pessoais, rate limit e o loop do agente com um cliente Gemini simulado.
 
 ## Deploy na Vercel
 
@@ -151,7 +152,15 @@ Na Vercel o app entra automaticamente em modo produção, usa `/tmp` para o SQLi
 
 ## Exemplos de conversa
 
-Conversas reais com o agente estão em [`examples/`](examples/), cobrindo catálogo com filtro de preço, preço com promoção e PIX, políticas de devolução aplicadas a um pedido real, pedido com e sem identificação, e pergunta fora do escopo.
+Conversas reais com o agente (`gemini-3.5-flash-lite`), com as ferramentas usadas em cada resposta:
+
+1. [Catálogo: violões até R$ 1.000 e indicação para iniciante](examples/01-catalogo-violoes-ate-1000.md)
+2. [Preço com promoção ativa, PIX não cumulativo e parcelamento](examples/02-preco-promocao-pix.md)
+3. [Devolução aplicada a um pedido real, com prazos calculados](examples/03-devolucao-pedido.md)
+4. [Status de pedido com verificação de identidade](examples/04-status-pedido-identificacao.md)
+5. [Horário, fora do escopo e tentativa de prompt injection](examples/05-escopo-horario-seguranca.md)
+
+Para regravar: `python scripts/record_examples.py` (respeita o limite de requisições da camada gratuita).
 
 ## Limitações e próximos passos
 
