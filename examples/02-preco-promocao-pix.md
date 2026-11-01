@@ -1,6 +1,6 @@
-# Preço com promoção ativa, regra de PIX não cumulativo e parcelamento
+# Price with an active promotion, a non-cumulative PIX discount and installments
 
-> Gravado com o agente real (`gemini-3.5-flash-lite`). Agora: domingo, 01/11/2026 18:16 (horário de Campo Grande/MS). A loja está FECHADA agora. Próxima abertura: segunda-feira às 09:00.
+> For reviewers: this is a real conversation with the agent (`gemini-3.5-flash-lite`), recorded on Sunday, 2026-11-01 at 18:16 (Campo Grande time). The store was closed; the next opening was Monday at 09:00. The dialogue stays in Portuguese, the language the agent actually used. The customer asks the price of a Taylor 110e, then whether the PIX discount stacks on top of the promotion, then how many card installments are available. The reply has to apply the active promotion, refuse stacking it with the PIX discount, and quote the installment plan.
 
 **Cliente:** Quanto custa o Taylor 110e?
 

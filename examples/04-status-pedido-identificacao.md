@@ -1,6 +1,6 @@
-# Status de pedido com verificação de identidade (LGPD)
+# Order status with identity verification
 
-> Gravado com o agente real (`gemini-3.5-flash-lite`). Agora: domingo, 01/11/2026 18:17 (horário de Campo Grande/MS). A loja está FECHADA agora. Próxima abertura: segunda-feira às 09:00.
+> For reviewers: this is a real conversation with the agent (`gemini-3.5-flash-lite`), recorded on Sunday, 2026-11-01 at 18:17 (Campo Grande time). The store was closed; the next opening was Monday at 09:00. The dialogue stays in Portuguese, the language the agent actually used. The customer asks for an order status. The agent refuses to reveal it until the order number matches the full name or the phone number, so one customer cannot read another customer's order.
 
 **Cliente:** Qual o status do pedido 8?
 

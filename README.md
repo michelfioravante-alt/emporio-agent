@@ -1,25 +1,27 @@
-# Empório da Música — Agente de Atendimento
+# Empório da Música — Customer Service Agent
 
-Protótipo de agente de atendimento por mensagens de texto para a **Empório da Música**, loja fictícia de instrumentos musicais em Campo Grande/MS (desafio técnico AI Engineer — Artefact).
+A text-based customer service agent for **Empório da Música**, a fictional musical-instrument store in Campo Grande, Brazil (Artefact AI Engineer technical case).
 
-O agente responde dúvidas de catálogo (preço, estoque, promoções, PIX e parcelamento), consulta pedidos com verificação de identidade, aplica as políticas da loja (trocas, devoluções, garantia, frete, horários), recusa com educação o que está fora do escopo e encaminha para a equipe humana com protocolo quando não consegue resolver.
+The agent answers catalog questions (price, stock, promotions, PIX and installments), looks up orders after verifying the customer's identity, applies store policy (exchanges, returns, warranty, shipping, opening hours), politely declines anything outside the store's scope, and opens a ticket for the human team when it cannot resolve the request.
 
-## Sumário
+The agent, the chat interface and the sample dialogues are in Portuguese, the language of the store and its customers. This README is in English, as required by the submission instructions.
 
-- [Como rodar](#como-rodar)
-- [Arquitetura](#arquitetura)
-- [Decisões técnicas](#decisões-técnicas)
-- [Segurança e privacidade](#segurança-e-privacidade)
-- [Tratamento dos dados e suposições](#tratamento-dos-dados-e-suposições)
-- [Testes](#testes)
-- [Deploy na Vercel](#deploy-na-vercel)
-- [Exemplos de conversa](#exemplos-de-conversa)
-- [Limitações e próximos passos](#limitações-e-próximos-passos)
-- [Uso de assistentes de código](#uso-de-assistentes-de-código)
+## Contents
 
-## Como rodar
+- [How to run](#how-to-run)
+- [Architecture](#architecture)
+- [Technical decisions](#technical-decisions)
+- [Security and privacy](#security-and-privacy)
+- [Data handling and assumptions](#data-handling-and-assumptions)
+- [Tests](#tests)
+- [Deploying on Vercel](#deploying-on-vercel)
+- [Sample conversations](#sample-conversations)
+- [Limitations and next steps](#limitations-and-next-steps)
+- [Use of coding assistants](#use-of-coding-assistants)
 
-Pré-requisitos: Python 3.11+ e uma chave gratuita do Gemini ([Google AI Studio](https://aistudio.google.com/apikey)).
+## How to run
+
+Requirements: Python 3.11+ and a free Gemini API key ([Google AI Studio](https://aistudio.google.com/apikey)).
 
 ```bash
 python -m venv .venv
@@ -34,152 +36,152 @@ pip install -r requirements.txt
 copy .env.example .env
 # macOS / Linux
 cp .env.example .env
-# edite .env e preencha GEMINI_API_KEY
+# edit .env and set GEMINI_API_KEY
 
 uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
-Abra <http://127.0.0.1:8000>. Para ver quais ferramentas o agente chamou em cada resposta (com dados pessoais ocultados), abra <http://127.0.0.1:8000/?review=1>. Esse modo só existe fora de produção.
+Open <http://127.0.0.1:8000>. To see which tools the agent called for each reply (with personal data redacted), open <http://127.0.0.1:8000/?review=1>. That mode is disabled in production.
 
-Variáveis de ambiente opcionais estão documentadas em [`.env.example`](.env.example) (modelo, limites de uso, CORS etc.).
+Optional environment variables are documented in [`.env.example`](.env.example) (model, usage limits, CORS and so on).
 
 ### API
 
 - `GET /api/health` — `{"status": "ok" | "degraded"}`
-- `POST /api/chat` — corpo `{"message": "...", "history": [{"role": "user|assistant", "content": "..."}]}`; resposta `{"reply": "...", "activity": [{"label": "...", "detail": "..."}]}`
+- `POST /api/chat` — body `{"message": "...", "history": [{"role": "user|assistant", "content": "..."}]}`; response `{"reply": "...", "activity": [{"label": "...", "detail": "..."}]}`
 
-## Arquitetura
+## Architecture
 
 ```mermaid
 flowchart LR
-    UI[Chat web<br/>static/] -->|POST /api/chat| API[FastAPI<br/>validação, rate limit,<br/>headers de segurança]
-    API --> AG[Loop do agente<br/>Gemini function calling]
-    AG -->|decide a ferramenta| T{Ferramentas Python}
-    T --> SQL[(SQLite<br/>CSVs da loja)]
-    T --> POL[Seções do manual<br/>PDF de políticas]
-    T --> CLK[Relógio da loja<br/>America/Campo_Grande]
-    T --> TK[(Chamados para<br/>equipe humana)]
-    AG -->|resposta| API --> UI
+    UI[Web chat<br/>static/] -->|POST /api/chat| API[FastAPI<br/>validation, rate limit,<br/>security headers]
+    API --> AG[Agent loop<br/>Gemini function calling]
+    AG -->|chooses a tool| T{Python tools}
+    T --> SQL[(SQLite<br/>store CSVs)]
+    T --> POL[Policy manual<br/>PDF sections]
+    T --> CLK[Store clock<br/>America/Campo_Grande]
+    T --> TK[(Tickets for<br/>the human team)]
+    AG -->|reply| API --> UI
 ```
 
-| Ferramenta | Quando o agente usa |
+| Tool | When the agent uses it |
 |---|---|
-| `search_products` | Busca por palavras, categoria e faixa de preço (preço final, já com promoção) |
-| `get_product_details` | Preço, promoção, PIX, parcelamento, specs; alternativas se indisponível |
-| `list_categories` | O que a loja vende |
-| `get_order_status` | Status do pedido, com nome completo ou telefone; prazos de troca/devolução/garantia já calculados |
-| `get_store_policies` | Trechos do manual: trocas, frete, pagamento, garantia, promoções, privacidade |
-| `get_store_profile` | Endereço, contatos, horário e se a loja está aberta agora |
-| `create_support_ticket` | Reclamação, cancelamento, defeito ou caso não resolvido: gera protocolo |
+| `search_products` | Search by words, category and price range (final price, promotion already applied) |
+| `get_product_details` | Price, promotion, PIX, installments, specs; alternatives when unavailable |
+| `list_categories` | What the store sells |
+| `get_order_status` | Order status, with full name or phone; exchange, return and warranty deadlines already calculated |
+| `get_store_policies` | Sections of the manual: exchanges, shipping, payment, warranty, promotions, privacy |
+| `get_store_profile` | Address, contacts, opening hours and whether the store is open right now |
+| `create_support_ticket` | Complaint, cancellation, defect or an unresolved case: issues a protocol number |
 
 ```text
 app/
-  main.py       # FastAPI: rotas, validação, headers, tratamento de erros
-  agent.py      # loop de function calling com o Gemini
-  tools.py      # ferramentas (SQL, políticas, pedidos, chamados)
-  prompts.py    # persona, regras e contexto atual
-  policies.py   # PDF -> seções pesquisáveis
-  clock.py      # fuso da loja, horário de funcionamento
+  main.py       # FastAPI: routes, validation, headers, error handling
+  agent.py      # Gemini function-calling loop
+  tools.py      # tools (SQL, policies, orders, tickets)
+  prompts.py    # persona, rules and the current store context
+  policies.py   # PDF -> searchable sections
+  clock.py      # store timezone and opening hours
   db.py         # CSVs -> SQLite
-  security.py   # rate limit, teto diário, redação de dados, detecção de injeção
-  config.py     # configuração por variáveis de ambiente
-static/         # interface do chat (HTML/CSS/JS sem framework)
-tests/          # pytest, sem chamadas reais ao LLM
-data/           # CSVs e PDF fornecidos no desafio
-examples/       # conversas reais com o agente
-scripts/        # record_examples.py: regrava os exemplos com o modelo configurado
+  security.py   # rate limit, daily cap, redaction, injection detection
+  config.py     # configuration from environment variables
+static/         # chat UI (HTML/CSS/JS, no framework)
+tests/          # pytest, no real LLM calls
+data/           # CSVs and PDF provided with the case
+examples/       # real conversations with the agent
+scripts/        # record_examples.py: re-records the samples with the configured model
 ```
 
-## Decisões técnicas
+## Technical decisions
 
-**Abordagem híbrida: function calling com ferramentas determinísticas.** Dados estruturados (preço, estoque, pedido) precisam ser exatos — o próprio manual diz que informação errada "pode configurar propaganda enganosa". Por isso o LLM nunca recebe a tabela inteira nem faz contas: ele decide *qual* ferramenta chamar e *como* comunicar o resultado. Preço no PIX, parcelamento máximo, preço promocional e prazos de devolução/garantia são calculados em Python e testados.
+**Hybrid approach: function calling with deterministic tools.** Structured data (price, stock, orders) has to be exact. The store manual itself says that wrong information can amount to misleading advertising. The LLM never sees the whole table and never does the arithmetic: it decides *which* tool to call and *how* to phrase the result. PIX price, maximum installments, promotional price and return/warranty deadlines are computed in Python and covered by tests.
 
-**Sem agente de SQL livre.** Um agente que gera SQL teria acesso à tabela de clientes e abriria espaço para vazamento de dados via prompt injection. Ferramentas com parâmetros tipados limitam o que o modelo consegue consultar e permitem aplicar autorização em código.
+**No free-form SQL agent.** An agent that writes SQL would have access to the customers table and could leak data through prompt injection. Tools with typed parameters limit what the model can query, and authorization is enforced in code.
 
-**Políticas: recuperação por seção, sem embeddings.** O manual tem 8 páginas e 10 seções bem definidas. Dividir por seção e buscar por palavras-chave é mais simples, barato, determinístico e fácil de depurar que um RAG vetorial. O modelo recebe a seção inteira, então não perde contexto de regras que dependem umas das outras (ex.: PIX x promoção). Com um corpus maior, o próximo passo seria embeddings + reranking.
+**Policies: section retrieval, no embeddings.** The manual is 8 pages and 10 well-defined sections. Splitting it by section and matching keywords is simpler, cheaper, deterministic and easier to debug than vector RAG. The model receives the whole section, so rules that depend on each other stay together (for example, PIX versus an active promotion). With a larger corpus, the next step would be embeddings plus reranking.
 
-**Loop próprio em vez de LangChain/LlamaIndex.** São ~150 linhas: modelo decide → Python executa → modelo responde, com limite de rodadas. Menos dependências, comportamento explícito e fácil de testar com um cliente falso (ver `tests/test_agent.py`).
+**A small custom loop instead of LangChain or LlamaIndex.** About 150 lines: the model decides, Python executes, the model answers, with a cap on rounds. Fewer dependencies, explicit behavior, and easy to test with a fake client (see `tests/test_agent.py`).
 
-**Modelo: Gemini Flash-Lite (`gemini-3.5-flash-lite` por padrão).** Comecei com o `gemini-2.5-flash`, mas a camada gratuita dele (5 requisições/minuto e 20/dia no momento do desenvolvimento) não sustenta nem a gravação dos exemplos — cada mensagem do cliente usa de 2 a 3 requisições (chamada de ferramenta + resposta). Gravei os mesmos cenários com o Flash-Lite e conferi as respostas: acertou as regras de preço, PIX, prazos, identificação de pedido e escopo. Como os números vêm das ferramentas, o agente não precisa do modelo mais forte; precisa de function calling confiável, bom português e latência baixa. O modelo é configurável por `GEMINI_MODEL` (ex.: um Flash maior em produção com faturamento ativo); temperatura baixa (0,3) para respostas consistentes.
+**Model: Gemini Flash-Lite (`gemini-3.5-flash-lite` by default).** I started with `gemini-2.5-flash`, but its free tier at the time of development (5 requests per minute and 20 per day) cannot even record the sample conversations. Each customer message costs 2 or 3 requests (tool call plus the reply). I recorded the same scenarios with Flash-Lite and checked the answers: it got the price rules, PIX, deadlines, order identification and scope right. Because the numbers come from the tools, the agent does not need the strongest model. It needs reliable function calling, good Portuguese and low latency. The model is configurable through `GEMINI_MODEL` (for example a larger Flash model in production, with billing enabled). Temperature is 0.3, for consistent replies.
 
-**Prompt.** O system prompt define persona (tom do manual: "amigo que entende de música"), escopo, qual ferramenta é fonte de verdade para cada assunto, regras de preço/promoção, privacidade, fluxo de atendimento da política 7.2 e regras de segurança. A cada turno é anexado o **contexto atual** (data/hora de Campo Grande, loja aberta ou fechada, próxima abertura), necessário para "fora do expediente, informe o horário de retorno". As descrições das ferramentas complementam o prompt com instruções de uso.
+**Prompt.** The system prompt defines the persona (the manual's tone: "a friend who understands music"), the scope, which tool is the source of truth for each topic, price and promotion rules, privacy, the service flow from policy 7.2, and the security rules. Every turn appends the **current context** (date and time in Campo Grande, whether the store is open, and the next opening). That is required for "outside business hours, tell the customer when we return". The tool descriptions add usage instructions on top of the prompt.
 
-**Interface: FastAPI + HTML/JS puro.** Mantém o projeto 100% Python no backend, sem build de frontend, e permite deploy simples. O painel "Consultamos" mostra ao cliente quais fontes foram usadas (transparência) sem expor dados brutos.
+**Interface: FastAPI plus plain HTML/JS.** The backend stays entirely Python, there is no frontend build, and deployment stays simple. The "Consultamos" panel shows the customer which sources were used, without exposing raw data.
 
-**Histórico de conversa.** O cliente guarda a conversa em `sessionStorage` (sobrevive a um recarregamento, some ao fechar a aba) e envia as últimas mensagens a cada requisição; o servidor é stateless e corta o histórico para as 12 últimas mensagens. Isso evita banco de sessões no protótipo e não guarda conversas de clientes no servidor (LGPD). A autorização de pedidos é feita pela ferramenta a cada chamada, então um histórico forjado não libera dados.
+**Conversation history.** The browser keeps the conversation in `sessionStorage` (it survives a reload and disappears when the tab is closed) and sends the latest messages with each request. The server is stateless and keeps only the last 12 messages. That avoids a session store in the prototype and does not keep customer conversations on the server (LGPD, the Brazilian data-protection law). Order authorization runs inside the tool on every call, so a forged history cannot unlock data.
 
-## Segurança e privacidade
+## Security and privacy
 
-- **Pedidos (LGPD):** exigem número do pedido + **nome completo** (ignorando acentos, maiúsculas e partículas como "da") ou **telefone com DDD**. A resposta para "pedido não existe" e "identificação não confere" é idêntica, evitando enumeração de pedidos. Telefone e e-mail do cliente nunca são devolvidos.
-- **Prompt injection:** a proteção real está no código (ferramentas tipadas, autorização em Python, sem SQL livre). Como defesa adicional, mensagens com padrões de injeção (português e inglês) são marcadas como entrada não confiável e o prompt instrui a ignorá-las.
-- **Abuso e custo:** rate limit por IP, teto diário de chamadas ao LLM, limite de tamanho da mensagem e do corpo da requisição, limite de rodadas de ferramentas e de tokens de saída.
-- **IP do cliente:** `X-Forwarded-For` só é considerado atrás de um proxy confiável (`TRUST_PROXY_HEADERS`, ativo automaticamente na Vercel, que sobrescreve o header).
-- **Erros:** o cliente recebe mensagens genéricas; detalhes ficam no log do servidor. Em produção a documentação OpenAPI e o modo de revisão ficam desativados.
-- **Navegador:** CSP restritiva, `X-Frame-Options: DENY`, `nosniff`, `no-referrer`; respostas do modelo são escapadas antes de renderizar (só `**negrito**` vira HTML).
-- **Segredos:** apenas via variáveis de ambiente; `.env` está no `.gitignore` e no `.vercelignore`.
+- **Orders (LGPD):** require the order number plus the **full name** (accents, case and particles such as "da" are ignored) or a **phone number with area code**. "Order not found" and "identity does not match" return the same message, so orders cannot be enumerated. The customer's phone and email are never returned.
+- **Prompt injection:** the real protection is in the code (typed tools, authorization in Python, no free-form SQL). As an extra layer, messages that match injection patterns (Portuguese and English) are marked as untrusted input, and the prompt tells the model to ignore them.
+- **Abuse and cost:** per-IP rate limit, a daily cap on LLM calls, limits on message size and request body size, and caps on tool rounds and output tokens.
+- **Client IP:** `X-Forwarded-For` is trusted only behind a trusted proxy (`TRUST_PROXY_HEADERS`, turned on automatically on Vercel, which overwrites the header).
+- **Errors:** the client gets a generic message; details stay in the server log. In production, the OpenAPI docs and the review mode are disabled.
+- **Browser:** a strict Content-Security-Policy, `X-Frame-Options: DENY`, `nosniff` and `no-referrer`. Model replies are escaped before rendering (only `**bold**` becomes HTML).
+- **Secrets:** environment variables only. `.env` is listed in `.gitignore` and `.vercelignore`.
 
-## Tratamento dos dados e suposições
+## Data handling and assumptions
 
-- Os CSVs são carregados em SQLite na inicialização, com chaves estrangeiras (verifiquei que não há registros órfãos).
-- Busca sem acento e com plural simples ("violao" encontra "Violões") via função de normalização registrada no SQLite.
-- Só promoções com `is_active = 1` são consideradas. Promoção inativa citada pelo cliente é tratada como encerrada (política 7.3).
-- **Data de recebimento:** o dataset não tem data de entrega real, então uso `estimated_delivery` como data de recebimento para os prazos de arrependimento (7 dias), troca por preferência (7 dias) e garantia legal (90 dias). Troca por defeito (30 dias) conta da data da compra, como diz o manual.
-- **Direito de arrependimento:** o manual o restringe a compras online; assumo que os pedidos do dataset são online (todos têm fluxo de envio).
-- **Parcelamento:** a tabela da seção 3 diz "até 12x, parcela mínima de R$ 100", mas a seção 3.1 detalha faixas (até 3x, 4–6x com mínimo R$ 80, 7–12x com mínimo R$ 100). Usei a 3.1, mais específica, interpretando "exceto abaixo de R$ 50,00" como parcela mínima de R$ 50 até 3x. Preço promocional não recebe desconto de PIX, mas pode ser parcelado.
-- **Telefones:** o manual traz (67) 3341-4444 como telefone/WhatsApp na capa e na seção 1.2, e (67) 3321-4500 como WhatsApp na seção 7. Mantive os dois como estão escritos, sem "corrigir" o documento.
-- **E-mail:** na seção 1.2 aparece com acento (`empóriodamusica`); usei a grafia da capa, sem acento, que é um domínio válido.
-- **Feriados:** o manual não traz calendário; o agente avisa que feriados podem alterar o horário em vez de inventar.
-- Status e formas de pagamento do CSV (em inglês) são traduzidos para português antes de chegar ao modelo.
+- The CSVs are loaded into SQLite at startup, with foreign keys. I checked that there are no orphan rows.
+- Search ignores accents and a simple plural ("violao" finds "Violões") through a normalization function registered in SQLite.
+- Only promotions with `is_active = 1` count. An inactive promotion mentioned by the customer is treated as ended (policy 7.3).
+- **Delivery date:** the dataset has no actual delivery date, so I use `estimated_delivery` as the receipt date for the cooling-off period (7 days), preference exchange (7 days) and legal warranty (90 days). Defect exchange (30 days) is counted from the purchase date, as the manual says.
+- **Cooling-off right:** the manual limits it to online purchases. I assume the orders in the dataset are online, because every one of them has a shipping flow.
+- **Installments:** the table in section 3 says "up to 12 installments, minimum installment of R$ 100", but section 3.1 gives the bands (up to 3 installments, 4–6 with a minimum of R$ 80, 7–12 with a minimum of R$ 100). I followed 3.1, which is more specific, and read "except below R$ 50.00" as a minimum installment of R$ 50 for up to 3 installments. A promotional price does not also get the PIX discount, but it can be paid in installments.
+- **Phone numbers:** the manual lists (67) 3341-4444 as the phone/WhatsApp on the cover and in section 1.2, and (67) 3321-4500 as WhatsApp in section 7. I kept both as written, instead of "correcting" the document.
+- **Email:** section 1.2 spells it with an accent (`empóriodamusica`). I used the cover spelling, without the accent, which is a valid domain.
+- **Holidays:** the manual has no calendar. The agent says that holidays may change the hours, instead of inventing them.
+- CSV statuses and payment methods (in English) are translated to Portuguese before they reach the model.
 
-## Testes
+## Tests
 
 ```bash
 pip install -r requirements-dev.txt
 pytest
 ```
 
-57 testes, sem chamadas reais ao LLM: autorização de pedidos, prazos de pós-venda, busca, regras de preço, horário de funcionamento, validações da API, redação de dados pessoais, rate limit e o loop do agente com um cliente Gemini simulado.
+57 tests, with no real LLM calls: order authorization, after-sales deadlines, search, price rules, opening hours, API validation, redaction of personal data, rate limiting, and the agent loop with a fake Gemini client.
 
-## Deploy na Vercel
+## Deploying on Vercel
 
-O projeto roda na Vercel sem adaptação de código (`app/main.py` é detectado como app FastAPI):
+The project runs on Vercel without code changes (`app/main.py` is detected as a FastAPI app):
 
-1. Importe o repositório na Vercel.
-2. Configure `GEMINI_API_KEY` em *Environment Variables* (opcional: `DAILY_CHAT_LIMIT`, `GEMINI_MODEL`).
+1. Import the repository on Vercel.
+2. Set `GEMINI_API_KEY` under Environment Variables (optional: `DAILY_CHAT_LIMIT`, `GEMINI_MODEL`).
 3. Deploy.
 
-Na Vercel o app entra automaticamente em modo produção, usa `/tmp` para o SQLite e confia no IP informado pela plataforma. Os chamados ficam em `/tmp`, portanto são temporários (ver limitações).
+On Vercel the app automatically runs in production mode, uses `/tmp` for SQLite and trusts the IP reported by the platform. Tickets live in `/tmp`, so they are temporary (see limitations).
 
-## Exemplos de conversa
+## Sample conversations
 
-Conversas reais com o agente (`gemini-3.5-flash-lite`), com as ferramentas usadas em cada resposta:
+Real conversations with the agent (`gemini-3.5-flash-lite`). Each file notes the tools used in every reply. The dialogue is in Portuguese, unchanged from what the agent actually said.
 
-1. [Catálogo: violões até R$ 1.000 e indicação para iniciante](examples/01-catalogo-violoes-ate-1000.md)
-2. [Preço com promoção ativa, PIX não cumulativo e parcelamento](examples/02-preco-promocao-pix.md)
-3. [Devolução aplicada a um pedido real, com prazos calculados](examples/03-devolucao-pedido.md)
-4. [Status de pedido com verificação de identidade](examples/04-status-pedido-identificacao.md)
-5. [Horário, fora do escopo e tentativa de prompt injection](examples/05-escopo-horario-seguranca.md)
+1. [Catalog: acoustic guitars up to R$ 1,000, then a recommendation for a beginner](examples/01-catalogo-violoes-ate-1000.md)
+2. [Price with an active promotion, non-cumulative PIX discount and installments](examples/02-preco-promocao-pix.md)
+3. [A return applied to a real order, with deadlines calculated from the current date](examples/03-devolucao-pedido.md)
+4. [Order status with identity verification](examples/04-status-pedido-identificacao.md)
+5. [Opening hours, an out-of-scope request and a prompt-injection attempt](examples/05-escopo-horario-seguranca.md)
 
-Para regravar: `python scripts/record_examples.py` (respeita o limite de requisições da camada gratuita).
+To record them again: `python scripts/record_examples.py` (it respects the free-tier request limit).
 
-## Limitações e próximos passos
+## Limitations and next steps
 
-- **Chamados e rate limit em memória/arquivo local:** em produção iriam para um banco gerenciado (ex.: Postgres) e um helpdesk/CRM, com rate limit compartilhado (ex.: Redis).
-- **Sem canal WhatsApp real:** a API já é independente da interface; o próximo passo seria um webhook do WhatsApp Business chamando o mesmo `chat()`.
-- **Identidade simplificada:** nome completo ou telefone é suficiente para um protótipo; em produção usaria código de verificação enviado ao telefone/e-mail do pedido.
-- **Busca por palavras-chave:** funciona bem para 65 produtos; com catálogo maior, usaria busca semântica para pedidos vagos ("violão bom para criança").
-- **Avaliação:** os testes cobrem as ferramentas de forma determinística; faltaria um conjunto de avaliação das respostas do LLM (perguntas de referência + verificação automática de preços citados, recusa de escopo, não vazamento de dados).
-- **Streaming** das respostas para reduzir a percepção de latência.
-- **Feriados** e horários especiais configuráveis.
+- **Tickets and rate limiting are in memory or a local file.** In production they would go to a managed database (for example Postgres) and a helpdesk or CRM, with a shared rate limit (for example Redis).
+- **No real WhatsApp channel.** The API is already independent of the interface. The next step would be a WhatsApp Business webhook calling the same `chat()`.
+- **Simplified identity check.** A full name or a phone number is enough for a prototype. In production I would send a verification code to the phone or email on the order.
+- **Keyword search.** It works well for 65 products. With a larger catalog I would add semantic search for vague requests ("a good guitar for a child").
+- **Evaluation.** The tests cover the tools deterministically. What is still missing is an evaluation set for the LLM replies: reference questions plus automatic checks that quoted prices are correct, out-of-scope requests are refused, and no personal data leaks.
+- **Streaming.** The chat reveals the reply word by word, but the model still returns the full text in one response. Token streaming would shorten the wait before the first word.
+- **Holidays** and special opening hours are not configurable.
 
-## Uso de assistentes de código
+## Use of coding assistants
 
-Usei o **Cursor** (agente com modelo Claude) como par de programação durante todo o projeto. Fluxo:
+I used **Cursor** (an agent backed by Claude) as a programming partner throughout the project. The workflow:
 
-1. **Entendimento:** li o enunciado e o manual; usei o agente para extrair o texto do PDF e perfilar os CSVs (status de produtos, promoções ativas, pedidos por status, registros órfãos). Isso levantou as inconsistências documentadas acima.
-2. **Arquitetura:** discuti as alternativas (RAG vetorial, agente SQL, function calling) e escolhi ferramentas determinísticas pelo requisito de precisão e privacidade.
-3. **Implementação incremental:** dados → ferramentas → loop do agente → API → interface, revisando cada contrato de ferramenta.
-4. **Revisão crítica:** pedi ao agente uma revisão do projeto contra o enunciado, com foco em segurança e UX, e validei cada achado com scripts antes de corrigir. Achados reais que viraram commits: a verificação de identidade do pedido aceitava uma única letra como nome; a conversa quebrava na 8ª mensagem por limite de histórico; a busca não encontrava "violao" sem acento; o agente não sabia a data atual para aplicar prazos de devolução.
-5. **Testes:** os testes foram escritos junto com as correções para fixar cada comportamento.
+1. **Understanding.** I read the case and the manual. I used the agent to extract the PDF text and profile the CSVs (product statuses, active promotions, orders by status, orphan rows). That is what surfaced the inconsistencies documented above.
+2. **Architecture.** I discussed the alternatives (vector RAG, a SQL agent, function calling) and chose deterministic tools because of the accuracy and privacy requirements.
+3. **Incremental implementation.** Data, then tools, then the agent loop, then the API, then the interface, reviewing each tool contract as I went.
+4. **Critical review.** I asked the agent to review the project against the case, focusing on security and UX, and I checked each finding with scripts before changing anything. Real findings that became commits: order identity verification accepted a single letter as a name; the conversation broke on the 8th message because of the history limit; search missed "violao" without the accent; the agent did not know the current date, so it could not apply return deadlines.
+5. **Tests.** Tests were written together with the fixes, to lock each behavior in.
 
-O histórico de commits mostra essa evolução. Revisei o código gerado, as regras de negócio contra o manual e as afirmações deste README.
+The commit history shows that progression. I reviewed the generated code, the business rules against the manual, and the statements in this README.
