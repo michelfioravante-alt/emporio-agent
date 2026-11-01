@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from contextlib import asynccontextmanager
 from typing import Any, Literal
 
@@ -25,12 +26,16 @@ from .db import init_db
 from .policies import get_sections
 from .security import (
     client_key,
+    daily_budget,
     normalize_history,
     public_activity,
     rate_limiter,
     review_tool_calls,
     sanitize_text,
 )
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+logger = logging.getLogger("emporio.api")
 
 
 @asynccontextmanager
@@ -145,17 +150,20 @@ def api_health() -> dict[str, Any]:
 @app.post("/api/chat", response_model=ChatResponse)
 def api_chat(payload: ChatRequest, request: Request) -> ChatResponse:
     rate_limiter.check(client_key(request))
+    daily_budget.consume()
     history = normalize_history(payload.history)
 
     try:
         result = chat(payload.message, history=history)
     except AgentError as exc:
-        # Keep client messages friendly; avoid leaking setup paths in production.
-        detail = str(exc)
-        if IS_PRODUCTION:
-            detail = "Atendimento temporariamente indisponível. Tente novamente em instantes."
+        # Setup hints (e.g. missing API key) are only useful to a local developer.
+        detail = str(exc) if not IS_PRODUCTION and exc.developer_hint else (
+            "Atendimento temporariamente indisponível. Tente novamente em instantes "
+            "ou fale com a gente pelo WhatsApp (67) 3321-4500."
+        )
         raise HTTPException(status_code=503, detail=detail) from exc
     except Exception:
+        logger.exception("Unexpected error in /api/chat")
         raise HTTPException(
             status_code=500,
             detail="Não foi possível concluir o atendimento agora. Tente novamente.",

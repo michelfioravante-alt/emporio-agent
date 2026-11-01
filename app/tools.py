@@ -7,6 +7,7 @@ policies need semantic topic matching.
 
 from __future__ import annotations
 
+import logging
 import re
 import sqlite3
 import unicodedata
@@ -14,6 +15,8 @@ from typing import Any
 
 from .db import connect
 from .policies import search_policies
+
+logger = logging.getLogger("emporio.tools")
 
 TOOL_DECLARATIONS = [
     {
@@ -71,8 +74,9 @@ TOOL_DECLARATIONS = [
     {
         "name": "get_order_status",
         "description": (
-            "Look up an order. Requires order_id plus customer name or phone "
-            "for privacy. Never reveal another customer's data."
+            "Look up an order. Requires order_id plus the customer's FULL name "
+            "or phone with DDD, exactly as given by the customer. Never guess or "
+            "reuse identification from other orders."
         ),
         "parameters": {
             "type": "object",
@@ -273,6 +277,36 @@ def list_categories() -> dict[str, Any]:
     }
 
 
+_NAME_PARTICLES = {"da", "de", "do", "das", "dos", "e"}
+
+# Same answer for "order does not exist" and "identity does not match",
+# so the tool cannot be used to discover which order numbers exist.
+_ORDER_NOT_VERIFIED = {
+    "authorized": False,
+    "message": (
+        "No order matches this number and identification. Ask the customer to double-check "
+        "the order number and the full name or phone used in the purchase. Do not reveal anything else."
+    ),
+}
+
+
+def _name_tokens(value: str | None) -> list[str]:
+    text = unicodedata.normalize("NFKD", value or "")
+    text = "".join(ch for ch in text if not unicodedata.combining(ch)).lower()
+    return [tok for tok in re.findall(r"[a-z]+", text) if tok not in _NAME_PARTICLES]
+
+
+def _name_matches(given: str | None, stored: str) -> bool:
+    given_tokens = _name_tokens(given)
+    return len(given_tokens) >= 2 and given_tokens == _name_tokens(stored)
+
+
+def _phone_matches(given: str | None, stored: str | None) -> bool:
+    given_digits, stored_digits = _digits(given), _digits(stored)
+    # Require at least DDD + number; accept an optional +55 prefix.
+    return len(given_digits) >= 10 and given_digits[-11:] == stored_digits[-11:]
+
+
 def get_order_status(
     order_id: int,
     customer_name: str | None = None,
@@ -281,8 +315,13 @@ def get_order_status(
     if not customer_name and not phone:
         return {
             "authorized": False,
-            "message": "Ask the customer for the order number and full name or phone before revealing order details.",
+            "message": "Ask the customer for the order number and full name or phone (with DDD) before revealing order details.",
         }
+
+    try:
+        order_id = int(order_id)
+    except (TypeError, ValueError):
+        return dict(_ORDER_NOT_VERIFIED)
 
     with connect() as conn:
         row = conn.execute(
@@ -301,20 +340,13 @@ def get_order_status(
         ).fetchone()
 
         if not row:
-            return {"found": False, "message": "Order not found."}
+            return dict(_ORDER_NOT_VERIFIED)
 
-        name_ok = bool(customer_name) and (
-            _norm(customer_name) in _norm(row["customer_name"])
-            or _norm(row["customer_name"]) in _norm(customer_name)
-        )
-        phone_ok = bool(phone) and _digits(phone) and _digits(phone) == _digits(row["customer_phone"])
-
-        if not (name_ok or phone_ok):
-            return {
-                "authorized": False,
-                "found": True,
-                "message": "Identification did not match this order. Do not reveal order details.",
-            }
+        if not (
+            _name_matches(customer_name, row["customer_name"])
+            or _phone_matches(phone, row["customer_phone"])
+        ):
+            return dict(_ORDER_NOT_VERIFIED)
 
         items = conn.execute(
             """
@@ -402,10 +434,12 @@ TOOL_HANDLERS = {
 def run_tool(name: str, arguments: dict[str, Any] | None = None) -> Any:
     handler = TOOL_HANDLERS.get(name)
     if not handler:
-        return {"error": f"Unknown tool: {name}"}
+        return {"error": "unknown_tool"}
     try:
         return handler(**(arguments or {}))
-    except TypeError as exc:
-        return {"error": f"Invalid arguments for {name}: {exc}"}
-    except Exception as exc:  # noqa: BLE001 - surface tool failures to the model
-        return {"error": f"Tool {name} failed: {exc}"}
+    except TypeError:
+        logger.warning("Invalid arguments for tool %s", name)
+        return {"error": "invalid_arguments", "hint": "Check the tool parameters and try again."}
+    except Exception:  # noqa: BLE001 - the model gets a generic error, details stay in server logs
+        logger.exception("Tool %s failed", name)
+        return {"error": "tool_failed", "hint": "Tell the customer the system is unavailable and offer human support."}

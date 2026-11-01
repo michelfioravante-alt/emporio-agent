@@ -11,21 +11,29 @@ from typing import Any
 from fastapi import HTTPException, Request
 
 from .config import (
+    DAILY_CHAT_LIMIT,
     MAX_HISTORY_MESSAGES,
     MAX_MESSAGE_LENGTH,
     RATE_LIMIT_BURST,
     RATE_LIMIT_WINDOW_SECONDS,
+    TRUST_PROXY_HEADERS,
 )
 
 ALLOWED_ROLES = {"user", "assistant"}
 
-# Soft prompt-injection markers. We do not block the chat, but we strip
-# attempts to smuggle system overrides into history content.
+# Soft prompt-injection markers. We do not block the chat; matching messages
+# are wrapped with a reminder that the text is untrusted customer input.
+# Real protection lives in the tools (authorization is enforced in code).
 _INJECTION_PATTERNS = [
     re.compile(r"(?i)ignore\s+(all\s+)?(previous|prior|above)\s+instructions"),
     re.compile(r"(?i)system\s*prompt"),
-    re.compile(r"(?i)developer\s*message"),
+    re.compile(r"(?i)developer\s*(message|mode)"),
     re.compile(r"(?i)reveal\s+(your|the)\s+(hidden\s+)?prompt"),
+    re.compile(r"(?i)ignor[ea]\s+(todas\s+)?(as\s+)?(suas\s+)?(instru[cç][oõ]es|regras)"),
+    re.compile(r"(?i)prompt\s+(do|de)\s+sistema"),
+    re.compile(r"(?i)modo\s+(desenvolvedor|dev|admin)"),
+    re.compile(r"(?i)(revele|mostre|mostra|me\s+d[aê])\s+(o\s+|seu\s+)?(prompt|instru[cç][oõ]es)"),
+    re.compile(r"(?i)\bjailbreak\b"),
 ]
 
 TOOL_LABELS = {
@@ -48,6 +56,8 @@ class RateLimiter:
     def check(self, key: str) -> None:
         now = time.monotonic()
         with self._lock:
+            if len(self._hits) > 10_000:
+                self._prune(now)
             bucket = self._hits[key]
             while bucket and now - bucket[0] > self.window:
                 bucket.popleft()
@@ -58,14 +68,46 @@ class RateLimiter:
                 )
             bucket.append(now)
 
+    def _prune(self, now: float) -> None:
+        stale = [key for key, bucket in self._hits.items() if not bucket or now - bucket[-1] > self.window]
+        for key in stale:
+            del self._hits[key]
+
+
+class DailyBudget:
+    """Caps LLM calls per UTC day so a public demo cannot drain the API quota."""
+
+    def __init__(self, limit: int) -> None:
+        self.limit = limit
+        self._day = ""
+        self._count = 0
+        self._lock = Lock()
+
+    def consume(self) -> None:
+        today = time.strftime("%Y-%m-%d", time.gmtime())
+        with self._lock:
+            if today != self._day:
+                self._day, self._count = today, 0
+            if self._count >= self.limit:
+                raise HTTPException(
+                    status_code=503,
+                    detail=(
+                        "Nosso atendimento online atingiu o limite de hoje. "
+                        "Fale com a gente pelo WhatsApp (67) 3321-4500."
+                    ),
+                )
+            self._count += 1
+
 
 rate_limiter = RateLimiter(RATE_LIMIT_BURST, RATE_LIMIT_WINDOW_SECONDS)
+daily_budget = DailyBudget(DAILY_CHAT_LIMIT)
 
 
 def client_key(request: Request) -> str:
-    forwarded = request.headers.get("x-forwarded-for", "")
-    if forwarded:
-        return forwarded.split(",")[0].strip()[:128]
+    if TRUST_PROXY_HEADERS:
+        forwarded = request.headers.get("x-forwarded-for", "")
+        if forwarded:
+            return forwarded.split(",")[0].strip()[:128]
     if request.client and request.client.host:
         return request.client.host
     return "unknown"

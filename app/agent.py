@@ -7,28 +7,34 @@ architecture stays easy to explain: model decides -> Python runs tools
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from google import genai
+from google.genai import errors as genai_errors
 from google.genai import types
 
-from .config import GEMINI_API_KEY, GEMINI_MODEL, IS_PRODUCTION, MAX_TOOL_ROUNDS
+from .config import GEMINI_API_KEY, GEMINI_MODEL, MAX_TOOL_ROUNDS
 from .prompts import SYSTEM_PROMPT
 from .security import looks_like_injection, sanitize_text
 from .tools import TOOL_DECLARATIONS, run_tool
 
 
+logger = logging.getLogger("emporio.agent")
+
+
 class AgentError(RuntimeError):
-    pass
+    def __init__(self, message: str, developer_hint: bool = False) -> None:
+        super().__init__(message)
+        self.developer_hint = developer_hint
 
 
 def _require_api_key() -> str:
     if not GEMINI_API_KEY or GEMINI_API_KEY == "your_key_here":
-        if IS_PRODUCTION:
-            raise AgentError("service_unavailable")
         raise AgentError(
             "GEMINI_API_KEY is missing. Copy .env.example to .env and paste a key "
-            "from https://aistudio.google.com/apikey"
+            "from https://aistudio.google.com/apikey",
+            developer_hint=True,
         )
     return GEMINI_API_KEY
 
@@ -113,11 +119,15 @@ def chat(message: str, history: list[dict[str, str]] | None = None) -> dict[str,
     tool_trace: list[dict[str, Any]] = []
 
     for _ in range(MAX_TOOL_ROUNDS):
-        response = client.models.generate_content(
-            model=GEMINI_MODEL,
-            contents=contents,
-            config=config,
-        )
+        try:
+            response = client.models.generate_content(
+                model=GEMINI_MODEL,
+                contents=contents,
+                config=config,
+            )
+        except genai_errors.APIError as exc:
+            logger.error("Gemini API error: code=%s status=%s", exc.code, exc.status)
+            raise AgentError("llm_unavailable") from exc
         model_content = response.candidates[0].content if response.candidates else None
         if model_content is None:
             raise AgentError("empty_model_response")
