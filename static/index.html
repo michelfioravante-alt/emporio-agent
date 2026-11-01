@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Empório da Música — Atendimento</title>
+    <meta
+      name="description"
+      content="Atendimento online da Empório da Música: instrumentos, pedidos e políticas da loja em Campo Grande."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Manrope:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <div class="sheet">
+      <header class="top">
+        <p class="label">Atendimento online</p>
+        <p class="label">Desde 2008</p>
+      </header>
+
+      <section class="editorial">
+        <div class="type-stack">
+          <p>SUA MÚSICA</p>
+          <p>COMEÇA</p>
+          <p>AQUI.</p>
+        </div>
+
+        <figure class="photo photo-a">
+          <img
+            src="https://images.unsplash.com/photo-1564186763535-ebb21ef5277f?auto=format&fit=crop&w=2000&q=90"
+            alt="Guitarras em exposição na loja"
+          />
+        </figure>
+
+        <div class="brand-block">
+          <p class="label">Campo Grande · MS</p>
+          <h1>EMPÓRIO</h1>
+          <p class="sub">DA MÚSICA</p>
+        </div>
+
+        <figure class="photo photo-b">
+          <img
+            src="https://images.unsplash.com/photo-1511379938547-c1f69419868d?auto=format&fit=crop&w=1200&q=90"
+            alt="Detalhe de instrumentos musicais"
+          />
+        </figure>
+      </section>
+
+      <section class="desk">
+        <div class="intro">
+          <p class="label">Conversa</p>
+          <h2>Fale com a loja</h2>
+          <p>
+            Tire dúvida de violão, preço, pedido ou troca. A gente responde com o que tem na loja agora.
+          </p>
+        </div>
+
+        <div class="console" aria-label="Atendimento online">
+          <div class="console-top">
+            <div class="console-status">
+              <p id="presenceLabel">Online agora</p>
+              <p class="hours">Seg–Sex 09–18 · Sáb 09–13</p>
+            </div>
+            <button class="text-btn" type="button" id="clearBtn">Nova conversa</button>
+          </div>
+
+          <div class="chat" id="chat"></div>
+
+          <div class="activity" id="activity" hidden>
+            <p class="activity-title">Consultamos</p>
+            <ul id="activityList"></ul>
+          </div>
+
+          <div class="prompts" id="scenarios">
+            <button type="button" data-prompt="Quais violões vocês têm até R$ 1000?">Violões até R$ 1000</button>
+            <button type="button" data-prompt="Quanto custa o Takamine GD20?">Takamine GD20</button>
+            <button type="button" data-prompt="Qual o endereço da loja e o horário de funcionamento?">Endereço e horário</button>
+            <button type="button" data-prompt="Me arrependi da compra, posso devolver?">Devolução</button>
+            <button type="button" data-prompt="Vocês vendem cabo P10 e palhetas?">Acessórios</button>
+          </div>
+
+          <form class="composer" id="composer">
+            <label class="sr-only" for="message">Mensagem</label>
+            <textarea
+              id="message"
+              rows="2"
+              maxlength="1500"
+              placeholder="Escreva sua mensagem"
+              required
+            ></textarea>
+            <button type="submit" id="sendBtn">Enviar</button>
+          </form>
+        </div>
+      </section>
+
+      <details class="review-panel" id="reviewPanel" hidden>
+        <summary>Detalhes técnicos da consulta</summary>
+        <pre id="reviewDebug"></pre>
+      </details>
+
+      <footer class="foot">
+        <span>Rua 14 de Maio, 3200 — Centro</span>
+        <span>(67) 3321-4500</span>
+        <span>contato@emporiodamusica.com.br</span>
+      </footer>
+    </div>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>
