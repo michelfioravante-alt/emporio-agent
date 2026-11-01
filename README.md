@@ -1,120 +1,176 @@
-# Empório da Música — AI Support Agent
+# Empório da Música — Agente de Atendimento
 
-Prototype customer-support agent for the Artefact AI Engineer case.
+Protótipo de agente de atendimento por mensagens de texto para a **Empório da Música**, loja fictícia de instrumentos musicais em Campo Grande/MS (desafio técnico AI Engineer — Artefact).
 
-The agent helps the fictional music store **Empório da Música** answer catalog, order and policy questions with a hybrid design:
+O agente responde dúvidas de catálogo (preço, estoque, promoções, PIX e parcelamento), consulta pedidos com verificação de identidade, aplica as políticas da loja (trocas, devoluções, garantia, frete, horários), recusa com educação o que está fora do escopo e encaminha para a equipe humana com protocolo quando não consegue resolver.
 
-- **SQL tools** for products, prices, stock, promotions and orders
-- **Policy section retrieval** for the store manual
-- **Gemini function calling** to decide which tool to use
-- **FastAPI + simple chat UI** that shows tool calls for auditability
+## Sumário
 
-## Why this architecture
+- [Como rodar](#como-rodar)
+- [Arquitetura](#arquitetura)
+- [Decisões técnicas](#decisões-técnicas)
+- [Segurança e privacidade](#segurança-e-privacidade)
+- [Tratamento dos dados e suposições](#tratamento-dos-dados-e-suposições)
+- [Testes](#testes)
+- [Deploy na Vercel](#deploy-na-vercel)
+- [Exemplos de conversa](#exemplos-de-conversa)
+- [Limitações e próximos passos](#limitações-e-próximos-passos)
+- [Uso de assistentes de código](#uso-de-assistentes-de-código)
 
-| Decision | Rationale |
-|---|---|
-| Hybrid tools + policy search | Structured facts (price/stock/order) must be exact. Policies are short enough for topic retrieval instead of a heavy vector RAG. |
-| SQLite from CSVs | Tiny relational model, easy joins, deterministic filters. |
-| Custom tool loop (no LangChain) | Fewer moving parts, easier to explain and debug. |
-| Gemini Flash | Free tier, solid function calling, simple setup for reviewers. |
-| FastAPI chat UI | Matches the full-stack flavor of the role while staying Python-only and reproducible. |
-| Visible tool calls | Differentiator for reviewers: you can see whether the agent queried data or policies. |
+## Como rodar
 
-## Setup
-
-1. Python 3.11+ recommended.
-2. Create a virtualenv and install dependencies:
+Pré-requisitos: Python 3.11+ e uma chave gratuita do Gemini ([Google AI Studio](https://aistudio.google.com/apikey)).
 
 ```bash
 python -m venv .venv
-
 # Windows
 .venv\Scripts\activate
-
 # macOS / Linux
 source .venv/bin/activate
 
 pip install -r requirements.txt
-```
 
-3. Create `.env` from the example and add a free Gemini key from [Google AI Studio](https://aistudio.google.com/apikey):
+# Windows
+copy .env.example .env
+# macOS / Linux
+cp .env.example .env
+# edite .env e preencha GEMINI_API_KEY
 
-```bash
-copy .env.example .env   # Windows
-# cp .env.example .env   # macOS / Linux
-```
-
-4. Run the app from this folder:
-
-```bash
 uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
-5. Open [http://127.0.0.1:8000](http://127.0.0.1:8000)
+Abra <http://127.0.0.1:8000>. Para ver quais ferramentas o agente chamou em cada resposta (com dados pessoais ocultados), abra <http://127.0.0.1:8000/?review=1>. Esse modo só existe fora de produção.
 
-## API
+Variáveis de ambiente opcionais estão documentadas em [`.env.example`](.env.example) (modelo, limites de uso, CORS etc.).
 
-- `GET /api/health` — public status (`ok` / `degraded`)
-- `POST /api/chat` — `{ "message": "...", "history": [{ "role": "user|assistant", "content": "..." }], "include_debug": false }`
+### API
 
-Customer responses return a friendly `activity` feed (what was consulted), not raw tool payloads.
-For reviewers, open `http://127.0.0.1:8000/?review=1` to request a redacted `debug` summary (disabled when `APP_ENV=production`).
+- `GET /api/health` — `{"status": "ok" | "degraded"}`
+- `POST /api/chat` — corpo `{"message": "...", "history": [{"role": "user|assistant", "content": "..."}]}`; resposta `{"reply": "...", "activity": [{"label": "...", "detail": "..."}]}`
 
-## Security posture
+## Arquitetura
 
-Production-minded defaults already in the prototype:
+```mermaid
+flowchart LR
+    UI[Chat web<br/>static/] -->|POST /api/chat| API[FastAPI<br/>validação, rate limit,<br/>headers de segurança]
+    API --> AG[Loop do agente<br/>Gemini function calling]
+    AG -->|decide a ferramenta| T{Ferramentas Python}
+    T --> SQL[(SQLite<br/>CSVs da loja)]
+    T --> POL[Seções do manual<br/>PDF de políticas]
+    T --> CLK[Relógio da loja<br/>America/Campo_Grande]
+    T --> TK[(Chamados para<br/>equipe humana)]
+    AG -->|resposta| API --> UI
+```
 
-- Secrets only via `.env` (never committed)
-- Host bound to `127.0.0.1` by default
-- CORS allowlist (no `*`)
-- Security headers + CSP
-- OpenAPI docs disabled when `APP_ENV=production`
-- Input size limits, history role allowlist, rate limiting
-- Order lookup requires customer name or phone
-- API errors are generic to clients; stack traces are not returned
-- Tool traces exposed to the browser are redacted (no full PII dumps)
-- Prompt hardened against jailbreak / secret exfiltration
-
-## Data notes / assumptions
-
-- CSVs are loaded into SQLite on startup.
-- Only promotions with `is_active = 1` are offered.
-- PIX 5% is documented as non-stackable with promotional prices.
-- Order lookup requires `order_id` plus customer name or phone (LGPD-inspired).
-- Phone numbers in the policy PDF disagree between cover and WhatsApp section; the agent exposes both as written instead of inventing a “fix”.
-- Conversation language is Portuguese because that matches the store and the sample scenarios. This README stays in English for the selection process.
-
-## Known limitations
-
-- No real WhatsApp integration.
-- Policy search is keyword/topic based, not embeddings.
-- No long-term memory beyond the browser session history sent to the API.
-- Gemini quality depends on the configured model and key quota.
-
-## Using AI coding assistants
-
-This project was built with **Cursor**. Workflow:
-
-1. Read the case PDF and profile the CSVs.
-2. Decide architecture together (hybrid tools, FastAPI UI, Gemini).
-3. Implement modules iteratively: DB → tools → agent loop → UI.
-4. Manually review tool contracts, privacy rules and README claims.
-
-## Example conversations
-
-See `examples/` after the demo transcripts are added.
-
-## Project layout
+| Ferramenta | Quando o agente usa |
+|---|---|
+| `search_products` | Busca por palavras, categoria e faixa de preço (preço final, já com promoção) |
+| `get_product_details` | Preço, promoção, PIX, parcelamento, specs; alternativas se indisponível |
+| `list_categories` | O que a loja vende |
+| `get_order_status` | Status do pedido, com nome completo ou telefone; prazos de troca/devolução/garantia já calculados |
+| `get_store_policies` | Trechos do manual: trocas, frete, pagamento, garantia, promoções, privacidade |
+| `get_store_profile` | Endereço, contatos, horário e se a loja está aberta agora |
+| `create_support_ticket` | Reclamação, cancelamento, defeito ou caso não resolvido: gera protocolo |
 
 ```text
 app/
-  agent.py      # Gemini tool-calling loop
-  tools.py      # SQL + policy tools
-  db.py         # CSV → SQLite
-  policies.py   # PDF section retrieval
-  prompts.py    # Persona and hard rules
-  main.py       # FastAPI app
-static/         # Chat UI
-data/           # Challenge CSVs + policy PDF
-examples/       # Sample transcripts
+  main.py       # FastAPI: rotas, validação, headers, tratamento de erros
+  agent.py      # loop de function calling com o Gemini
+  tools.py      # ferramentas (SQL, políticas, pedidos, chamados)
+  prompts.py    # persona, regras e contexto atual
+  policies.py   # PDF -> seções pesquisáveis
+  clock.py      # fuso da loja, horário de funcionamento
+  db.py         # CSVs -> SQLite
+  security.py   # rate limit, teto diário, redação de dados, detecção de injeção
+  config.py     # configuração por variáveis de ambiente
+static/         # interface do chat (HTML/CSS/JS sem framework)
+tests/          # pytest, sem chamadas reais ao LLM
+data/           # CSVs e PDF fornecidos no desafio
+examples/       # conversas reais com o agente
 ```
+
+## Decisões técnicas
+
+**Abordagem híbrida: function calling com ferramentas determinísticas.** Dados estruturados (preço, estoque, pedido) precisam ser exatos — o próprio manual diz que informação errada "pode configurar propaganda enganosa". Por isso o LLM nunca recebe a tabela inteira nem faz contas: ele decide *qual* ferramenta chamar e *como* comunicar o resultado. Preço no PIX, parcelamento máximo, preço promocional e prazos de devolução/garantia são calculados em Python e testados.
+
+**Sem agente de SQL livre.** Um agente que gera SQL teria acesso à tabela de clientes e abriria espaço para vazamento de dados via prompt injection. Ferramentas com parâmetros tipados limitam o que o modelo consegue consultar e permitem aplicar autorização em código.
+
+**Políticas: recuperação por seção, sem embeddings.** O manual tem 8 páginas e 10 seções bem definidas. Dividir por seção e buscar por palavras-chave é mais simples, barato, determinístico e fácil de depurar que um RAG vetorial. O modelo recebe a seção inteira, então não perde contexto de regras que dependem umas das outras (ex.: PIX x promoção). Com um corpus maior, o próximo passo seria embeddings + reranking.
+
+**Loop próprio em vez de LangChain/LlamaIndex.** São ~150 linhas: modelo decide → Python executa → modelo responde, com limite de rodadas. Menos dependências, comportamento explícito e fácil de testar com um cliente falso (ver `tests/test_agent.py`).
+
+**Modelo: Gemini Flash (`gemini-2.5-flash` por padrão).** Tem camada gratuita, function calling confiável, boa qualidade em português e latência baixa — adequado para atendimento. O modelo é configurável por `GEMINI_MODEL`; temperatura baixa (0,3) para respostas consistentes.
+
+**Prompt.** O system prompt define persona (tom do manual: "amigo que entende de música"), escopo, qual ferramenta é fonte de verdade para cada assunto, regras de preço/promoção, privacidade, fluxo de atendimento da política 7.2 e regras de segurança. A cada turno é anexado o **contexto atual** (data/hora de Campo Grande, loja aberta ou fechada, próxima abertura), necessário para "fora do expediente, informe o horário de retorno". As descrições das ferramentas complementam o prompt com instruções de uso.
+
+**Interface: FastAPI + HTML/JS puro.** Mantém o projeto 100% Python no backend, sem build de frontend, e permite deploy simples. O painel "Consultamos" mostra ao cliente quais fontes foram usadas (transparência) sem expor dados brutos.
+
+**Histórico de conversa.** O cliente guarda a conversa em `sessionStorage` (sobrevive a um recarregamento, some ao fechar a aba) e envia as últimas mensagens a cada requisição; o servidor é stateless e corta o histórico para as 12 últimas mensagens. Isso evita banco de sessões no protótipo e não guarda conversas de clientes no servidor (LGPD). A autorização de pedidos é feita pela ferramenta a cada chamada, então um histórico forjado não libera dados.
+
+## Segurança e privacidade
+
+- **Pedidos (LGPD):** exigem número do pedido + **nome completo** (ignorando acentos, maiúsculas e partículas como "da") ou **telefone com DDD**. A resposta para "pedido não existe" e "identificação não confere" é idêntica, evitando enumeração de pedidos. Telefone e e-mail do cliente nunca são devolvidos.
+- **Prompt injection:** a proteção real está no código (ferramentas tipadas, autorização em Python, sem SQL livre). Como defesa adicional, mensagens com padrões de injeção (português e inglês) são marcadas como entrada não confiável e o prompt instrui a ignorá-las.
+- **Abuso e custo:** rate limit por IP, teto diário de chamadas ao LLM, limite de tamanho da mensagem e do corpo da requisição, limite de rodadas de ferramentas e de tokens de saída.
+- **IP do cliente:** `X-Forwarded-For` só é considerado atrás de um proxy confiável (`TRUST_PROXY_HEADERS`, ativo automaticamente na Vercel, que sobrescreve o header).
+- **Erros:** o cliente recebe mensagens genéricas; detalhes ficam no log do servidor. Em produção a documentação OpenAPI e o modo de revisão ficam desativados.
+- **Navegador:** CSP restritiva, `X-Frame-Options: DENY`, `nosniff`, `no-referrer`; respostas do modelo são escapadas antes de renderizar (só `**negrito**` vira HTML).
+- **Segredos:** apenas via variáveis de ambiente; `.env` está no `.gitignore` e no `.vercelignore`.
+
+## Tratamento dos dados e suposições
+
+- Os CSVs são carregados em SQLite na inicialização, com chaves estrangeiras (verifiquei que não há registros órfãos).
+- Busca sem acento e com plural simples ("violao" encontra "Violões") via função de normalização registrada no SQLite.
+- Só promoções com `is_active = 1` são consideradas. Promoção inativa citada pelo cliente é tratada como encerrada (política 7.3).
+- **Data de recebimento:** o dataset não tem data de entrega real, então uso `estimated_delivery` como data de recebimento para os prazos de arrependimento (7 dias), troca por preferência (7 dias) e garantia legal (90 dias). Troca por defeito (30 dias) conta da data da compra, como diz o manual.
+- **Direito de arrependimento:** o manual o restringe a compras online; assumo que os pedidos do dataset são online (todos têm fluxo de envio).
+- **Parcelamento:** a tabela da seção 3 diz "até 12x, parcela mínima de R$ 100", mas a seção 3.1 detalha faixas (até 3x, 4–6x com mínimo R$ 80, 7–12x com mínimo R$ 100). Usei a 3.1, mais específica, interpretando "exceto abaixo de R$ 50,00" como parcela mínima de R$ 50 até 3x. Preço promocional não recebe desconto de PIX, mas pode ser parcelado.
+- **Telefones:** o manual traz (67) 3341-4444 como telefone/WhatsApp na capa e na seção 1.2, e (67) 3321-4500 como WhatsApp na seção 7. Mantive os dois como estão escritos, sem "corrigir" o documento.
+- **E-mail:** na seção 1.2 aparece com acento (`empóriodamusica`); usei a grafia da capa, sem acento, que é um domínio válido.
+- **Feriados:** o manual não traz calendário; o agente avisa que feriados podem alterar o horário em vez de inventar.
+- Status e formas de pagamento do CSV (em inglês) são traduzidos para português antes de chegar ao modelo.
+
+## Testes
+
+```bash
+pip install -r requirements-dev.txt
+pytest
+```
+
+56 testes, sem chamadas reais ao LLM: autorização de pedidos, prazos de pós-venda, busca, regras de preço, horário de funcionamento, validações da API, redação de dados pessoais, rate limit e o loop do agente com um cliente Gemini simulado.
+
+## Deploy na Vercel
+
+O projeto roda na Vercel sem adaptação de código (`app/main.py` é detectado como app FastAPI):
+
+1. Importe o repositório na Vercel.
+2. Configure `GEMINI_API_KEY` em *Environment Variables* (opcional: `DAILY_CHAT_LIMIT`, `GEMINI_MODEL`).
+3. Deploy.
+
+Na Vercel o app entra automaticamente em modo produção, usa `/tmp` para o SQLite e confia no IP informado pela plataforma. Os chamados ficam em `/tmp`, portanto são temporários (ver limitações).
+
+## Exemplos de conversa
+
+Conversas reais com o agente estão em [`examples/`](examples/), cobrindo catálogo com filtro de preço, preço com promoção e PIX, políticas de devolução aplicadas a um pedido real, pedido com e sem identificação, e pergunta fora do escopo.
+
+## Limitações e próximos passos
+
+- **Chamados e rate limit em memória/arquivo local:** em produção iriam para um banco gerenciado (ex.: Postgres) e um helpdesk/CRM, com rate limit compartilhado (ex.: Redis).
+- **Sem canal WhatsApp real:** a API já é independente da interface; o próximo passo seria um webhook do WhatsApp Business chamando o mesmo `chat()`.
+- **Identidade simplificada:** nome completo ou telefone é suficiente para um protótipo; em produção usaria código de verificação enviado ao telefone/e-mail do pedido.
+- **Busca por palavras-chave:** funciona bem para 65 produtos; com catálogo maior, usaria busca semântica para pedidos vagos ("violão bom para criança").
+- **Avaliação:** os testes cobrem as ferramentas de forma determinística; faltaria um conjunto de avaliação das respostas do LLM (perguntas de referência + verificação automática de preços citados, recusa de escopo, não vazamento de dados).
+- **Streaming** das respostas para reduzir a percepção de latência.
+- **Feriados** e horários especiais configuráveis.
+
+## Uso de assistentes de código
+
+Usei o **Cursor** (agente com modelo Claude) como par de programação durante todo o projeto. Fluxo:
+
+1. **Entendimento:** li o enunciado e o manual; usei o agente para extrair o texto do PDF e perfilar os CSVs (status de produtos, promoções ativas, pedidos por status, registros órfãos). Isso levantou as inconsistências documentadas acima.
+2. **Arquitetura:** discuti as alternativas (RAG vetorial, agente SQL, function calling) e escolhi ferramentas determinísticas pelo requisito de precisão e privacidade.
+3. **Implementação incremental:** dados → ferramentas → loop do agente → API → interface, revisando cada contrato de ferramenta.
+4. **Revisão crítica:** pedi ao agente uma revisão do projeto contra o enunciado, com foco em segurança e UX, e validei cada achado com scripts antes de corrigir. Achados reais que viraram commits: a verificação de identidade do pedido aceitava uma única letra como nome; a conversa quebrava na 8ª mensagem por limite de histórico; a busca não encontrava "violao" sem acento; o agente não sabia a data atual para aplicar prazos de devolução.
+5. **Testes:** os testes foram escritos junto com as correções para fixar cada comportamento.
+
+O histórico de commits mostra essa evolução. Revisei o código gerado, as regras de negócio contra o manual e as afirmações deste README.
