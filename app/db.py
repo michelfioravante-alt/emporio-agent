@@ -53,11 +53,11 @@ def _read_csv(name: str) -> list[dict[str, str]]:
 
 
 def init_db(force: bool = False) -> Path:
+    """Reload store data from the CSVs. Support tickets are kept across reloads."""
     if DB_PATH.exists() and not force:
         return DB_PATH
 
-    if DB_PATH.exists():
-        DB_PATH.unlink()
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
     categories = _read_csv("categories")
     customers = _read_csv("customers")
@@ -69,6 +69,26 @@ def init_db(force: bool = False) -> Path:
     with connect() as conn:
         conn.executescript(
             """
+            PRAGMA foreign_keys = OFF;
+            DROP TABLE IF EXISTS order_items;
+            DROP TABLE IF EXISTS orders;
+            DROP TABLE IF EXISTS promotions;
+            DROP TABLE IF EXISTS products;
+            DROP TABLE IF EXISTS customers;
+            DROP TABLE IF EXISTS categories;
+            PRAGMA foreign_keys = ON;
+
+            CREATE TABLE IF NOT EXISTS support_tickets (
+                protocol TEXT PRIMARY KEY,
+                created_at TEXT NOT NULL,
+                reason TEXT NOT NULL,
+                customer_name TEXT NOT NULL,
+                contact TEXT NOT NULL,
+                order_id INTEGER,
+                summary TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'open'
+            );
+
             CREATE TABLE categories (
                 category_id INTEGER PRIMARY KEY,
                 name TEXT NOT NULL,

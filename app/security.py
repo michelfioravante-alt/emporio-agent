@@ -44,6 +44,7 @@ TOOL_LABELS = {
     "get_order_status": "Status do pedido",
     "get_store_policies": "Políticas da loja",
     "get_store_profile": "Dados da loja",
+    "create_support_ticket": "Equipe de atendimento",
 }
 
 
@@ -191,6 +192,11 @@ def _activity_detail(name: str, args: dict[str, Any], result: Any) -> str:
     if name == "get_store_profile":
         return "endereço, contatos e horário"
 
+    if name == "create_support_ticket":
+        if isinstance(result, dict) and result.get("created"):
+            return f"chamado {result.get('protocol')} registrado"
+        return "aguardando dados para registrar o chamado"
+
     return "consulta concluída"
 
 
@@ -216,7 +222,11 @@ def _redact_args(args: dict[str, Any]) -> dict[str, Any]:
     if "customer_name" in redacted and redacted["customer_name"]:
         name = str(redacted["customer_name"]).strip()
         parts = name.split()
-        redacted["customer_name"] = parts[0] + (" ***" if len(parts) > 1 else "")
+        redacted["customer_name"] = (parts[0] + (" ***" if len(parts) > 1 else "")) if parts else "***"
+    if "contact" in redacted and redacted["contact"]:
+        redacted["contact"] = "***"
+    if "summary" in redacted and redacted["summary"]:
+        redacted["summary"] = f"<{len(str(redacted['summary']))} chars>"
     return redacted
 
 
@@ -238,6 +248,8 @@ def _summarize_result(name: str | None, result: Any) -> dict[str, Any]:
             "authorized": result.get("authorized"),
             "status": (result.get("order") or {}).get("status") if result.get("authorized") else None,
         }
+    if name == "create_support_ticket":
+        return {"created": result.get("created"), "protocol": result.get("protocol")}
     if name == "get_store_policies":
         sections = result.get("sections") or []
         return {"sections": [s.get("section_id") for s in sections if isinstance(s, dict)]}

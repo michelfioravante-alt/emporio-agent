@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import secrets
 import sqlite3
 from datetime import date, timedelta
 from typing import Any
@@ -19,6 +20,8 @@ from .db import connect, norm_text
 from .policies import search_policies
 
 logger = logging.getLogger("emporio.tools")
+
+TICKET_REASONS = {"reclamacao", "cancelamento", "troca_devolucao", "defeito_garantia", "outro"}
 
 TOOL_DECLARATIONS = [
     {
@@ -116,8 +119,30 @@ TOOL_DECLARATIONS = [
     },
     {
         "name": "get_store_profile",
-        "description": "Return short store identity facts used for greetings and contact questions.",
+        "description": "Return store address, contacts, opening hours and whether it is open right now.",
         "parameters": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "create_support_ticket",
+        "description": (
+            "Hand the case over to the human team (complaint, cancellation request, defect, "
+            "warranty, or anything the assistant cannot solve). Only call after the customer "
+            "agreed and gave name and a contact (phone with DDD or e-mail). Returns a protocol number."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "reason": {
+                    "type": "string",
+                    "enum": sorted(TICKET_REASONS),
+                },
+                "customer_name": {"type": "string"},
+                "contact": {"type": "string", "description": "Phone with DDD or e-mail given by the customer."},
+                "summary": {"type": "string", "description": "Short neutral summary of the request, max 500 chars."},
+                "order_id": {"type": "integer"},
+            },
+            "required": ["reason", "customer_name", "contact", "summary"],
+        },
     },
 ]
 
@@ -443,7 +468,7 @@ def _after_sales(status: str, order_date: str | None, estimated_delivery: str | 
         return {
             "note": (
                 "Not shipped yet. Return windows start on delivery. Cancellation requests "
-                "are handled by the human team via WhatsApp."
+                "are handled by the human team: offer create_support_ticket."
             )
         }
     if status == "shipped":
@@ -589,7 +614,53 @@ def get_store_profile() -> dict[str, Any]:
     }
 
 
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+def create_support_ticket(
+    reason: str,
+    customer_name: str,
+    contact: str,
+    summary: str,
+    order_id: int | None = None,
+) -> dict[str, Any]:
+    reason = (reason or "").strip().lower()
+    customer_name = (customer_name or "").strip()[:120]
+    contact = (contact or "").strip()[:120]
+    summary = (summary or "").strip()[:500]
+
+    if reason not in TICKET_REASONS:
+        reason = "outro"
+    if len(_name_tokens(customer_name)) < 1:
+        return {"created": False, "message": "Ask the customer for their name."}
+    if not (len(_digits(contact)) >= 10 or _EMAIL_RE.match(contact)):
+        return {"created": False, "message": "Ask for a valid phone with DDD or e-mail."}
+    if len(summary) < 10:
+        return {"created": False, "message": "Ask the customer to briefly describe the issue."}
+
+    now = now_local()
+    # Random suffix: protocols must not be guessable or enumerable.
+    protocol = f"EMP-{now:%Y%m%d}-{secrets.token_hex(3).upper()}"
+    with connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO support_tickets (protocol, created_at, reason, customer_name, contact, order_id, summary)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (protocol, now.isoformat(timespec="seconds"), reason, customer_name, contact,
+             int(order_id) if order_id is not None else None, summary),
+        )
+    logger.info("Support ticket %s created (reason=%s)", protocol, reason)
+    return {
+        "created": True,
+        "protocol": protocol,
+        "response_time": "até 24 horas úteis",
+        "message": "Give the protocol to the customer and say the team will contact them.",
+    }
+
+
 TOOL_HANDLERS = {
+    "create_support_ticket": create_support_ticket,
     "search_products": search_products,
     "get_product_details": get_product_details,
     "list_categories": list_categories,
