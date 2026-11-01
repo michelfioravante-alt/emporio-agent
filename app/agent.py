@@ -40,8 +40,8 @@ class AgentError(RuntimeError):
 def _require_api_key() -> str:
     if not GEMINI_API_KEY or GEMINI_API_KEY == "your_key_here":
         raise AgentError(
-            "GEMINI_API_KEY is missing. Copy .env.example to .env and paste a key "
-            "from https://aistudio.google.com/apikey",
+            "GEMINI_API_KEY não configurada. Copie .env.example para .env e cole uma chave "
+            "gerada em https://aistudio.google.com/apikey",
             developer_hint=True,
         )
     return GEMINI_API_KEY
