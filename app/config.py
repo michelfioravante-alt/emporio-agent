@@ -16,6 +16,13 @@ def _env_bool(name: str, default: bool) -> bool:
     return raw.strip().lower() in {"1", "true", "yes"}
 
 
+# Use the OS certificate store instead of certifi. Needed on machines where an
+# antivirus or corporate proxy inspects HTTPS (e.g. Avast Web Shield on Windows).
+if _env_bool("USE_SYSTEM_CERTS", False):
+    import truststore
+
+    truststore.inject_into_ssl()
+
 # Vercel sets VERCEL=1. Its filesystem is read-only except /tmp, and it
 # overwrites X-Forwarded-For, so the client IP header can be trusted there.
 ON_VERCEL = bool(os.getenv("VERCEL"))

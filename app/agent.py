@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+import httpx
 from google import genai
 from google.genai import errors as genai_errors
 from google.genai import types
@@ -137,6 +138,9 @@ def chat(message: str, history: list[dict[str, str]] | None = None) -> dict[str,
         except genai_errors.APIError as exc:
             logger.error("Gemini API error: code=%s status=%s", exc.code, exc.status)
             raise AgentError("llm_unavailable") from exc
+        except httpx.HTTPError as exc:
+            logger.error("Network error calling Gemini: %s", type(exc).__name__)
+            raise AgentError("llm_unreachable") from exc
         model_content = response.candidates[0].content if response.candidates else None
         if model_content is None:
             raise AgentError("empty_model_response")
