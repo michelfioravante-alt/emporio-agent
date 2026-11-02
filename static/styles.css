@@ -503,6 +503,21 @@ body {
   text-transform: uppercase;
 }
 
+.foot a {
+  color: inherit;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.18em;
+}
+
+.foot a:hover {
+  color: var(--ink);
+}
+
+.foot a[href^="mailto:"] {
+  letter-spacing: 0.04em;
+  text-transform: none;
+}
+
 @media (max-width: 900px) {
   .editorial {
     grid-template-columns: 1fr 1fr;
